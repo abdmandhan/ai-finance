@@ -8,6 +8,14 @@ export const invoiceLineSchema = z.object({
 });
 export type InvoiceLine = z.infer<typeof invoiceLineSchema>;
 
+/** A file attached to the inbound message (photo/document) to read and attach to the draft. */
+export const attachmentRefSchema = z.object({
+  url: z.string(),
+  mimeType: z.string(),
+  fileName: z.string(),
+});
+export type AttachmentRef = z.infer<typeof attachmentRefSchema>;
+
 /**
  * Entities extracted from an invoicing/billing request.
  * `docType`: sales = you invoice a customer (ACCREC); bill = a supplier bills you (ACCPAY).

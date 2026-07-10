@@ -1,4 +1,4 @@
-import { invoiceLineSchema, invoiceResultSchema } from "@/schemas";
+import { attachmentRefSchema, invoiceLineSchema, invoiceResultSchema } from "@/schemas";
 import { StateSchema, UntrackedValue } from "@langchain/langgraph";
 import { z } from "zod";
 
@@ -11,6 +11,7 @@ export const InvoiceState = new StateSchema({
   threadId: z.string(),
   tenantId: z.string().default(""),
   userMessage: z.string(),
+  attachments: z.array(attachmentRefSchema).default(() => []),
 
   // Extracted entities
   docType: z.enum(["sales", "bill", "unsupported"]).optional(),

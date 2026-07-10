@@ -10,6 +10,7 @@ import {
 import { invoicePrompts } from "@/prompts";
 import {
   createAuditService,
+  createFetchAttachment,
   createKafkaService,
   createLlmService,
   createResolveAuth,
@@ -125,6 +126,7 @@ async function main(): Promise<void> {
         expenseAccountCode: config.xero.default_expense_account_code,
         revenueAccountCode: config.xero.default_revenue_account_code,
       },
+      fetchAttachment: createFetchAttachment(),
       logger,
       onProgress,
     },
@@ -389,10 +391,22 @@ async function main(): Promise<void> {
       return;
     }
     audit.runStarted({ threadId: chatId, workflow, userId: msg.createdBy });
+    // Invoicing can read + attach files (photo/document) carried on the message.
+    const attachments =
+      workflow === "invoice"
+        ? msg.content
+            .filter((c) => (c.type === "photo" || c.type === "document") && c.url)
+            .map((c) => ({
+              url: c.url as string,
+              mimeType: c.mimeType ?? "application/octet-stream",
+              fileName: c.fileName ?? "attachment",
+            }))
+        : [];
     await drive(workflow, chatId, {
       threadId: chatId,
       tenantId: msg.tenantId ?? "",
       userMessage: text,
+      ...(attachments.length ? { attachments } : {}),
     });
   });
 

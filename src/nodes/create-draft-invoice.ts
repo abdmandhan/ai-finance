@@ -77,7 +77,7 @@ export function makeCreateDraftInvoiceNode(deps: InvoiceDeps) {
         );
         return {
           invoiceId: created.InvoiceID,
-          _nextNode: INVOICE_NODES.approval,
+          _nextNode: INVOICE_NODES.attach,
         };
       } catch (err) {
         deps.logger.error({ err }, "create-draft-invoice failed");

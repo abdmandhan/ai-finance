@@ -1,7 +1,12 @@
 import type { ILogger } from "@/commons";
 import type { OrgDefaultsConfig } from "@/commons";
 import type { ProgressEvent } from "@/schemas";
-import type { ILlmService, ResolveAuth, ResolveXeroAuth } from "@/services";
+import type {
+  FetchAttachment,
+  ILlmService,
+  ResolveAuth,
+  ResolveXeroAuth,
+} from "@/services";
 import type {
   ICalendarTool,
   IContactsTool,
@@ -64,6 +69,8 @@ export interface InvoiceDeps {
   xeroTool: IXeroTool;
   resolveXeroAuth: ResolveXeroAuth;
   orgDefaults: OrgDefaultsConfig;
+  /** Download an attachment's bytes/data-url. Optional — image reading + attach skip when absent. */
+  fetchAttachment?: FetchAttachment;
   logger: ILogger;
   onProgress?: (chatId: string, event: ProgressEvent) => void;
 }
@@ -90,6 +97,7 @@ export const INVOICE_NODES: Record<string, string> = {
   askClarification: "ask_clarification",
   resolveContact: "resolve_xero_contact",
   createDraft: "create_draft_invoice",
+  attach: "attach_invoice_file",
   approval: "invoice_approval",
   authorise: "authorise_invoice",
   finalize: "finalize_invoice",

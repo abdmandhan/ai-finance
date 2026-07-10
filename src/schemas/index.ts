@@ -10,9 +10,11 @@ export {
 export {
   invoiceSchemas,
   invoiceLineSchema,
+  attachmentRefSchema,
   invoiceIntentSchema,
   invoiceResultSchema,
   type InvoiceLine,
+  type AttachmentRef,
   type InvoiceIntent,
   type InvoiceResult,
 } from "./invoice.schema";

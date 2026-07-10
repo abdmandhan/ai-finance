@@ -47,6 +47,8 @@ export interface XeroAccount {
   Name?: string;
   Type?: string;
   Status?: string;
+  /** The account's default tax type — the only tax valid for lines posted to this account. */
+  TaxType?: string;
 }
 
 export interface XeroTaxRate {
@@ -67,6 +69,13 @@ export interface IXeroTool {
     invoices: XeroInvoiceInput[],
   ): Promise<XeroInvoice[]>;
   authoriseInvoice(auth: XeroAuth, invoiceId: string): Promise<XeroInvoice>;
+  attachToInvoice(
+    auth: XeroAuth,
+    invoiceId: string,
+    fileName: string,
+    bytes: Uint8Array,
+    contentType: string,
+  ): Promise<void>;
   getAccounts(auth: XeroAuth): Promise<XeroAccount[]>;
   getTaxRates(auth: XeroAuth): Promise<XeroTaxRate[]>;
 }
@@ -187,6 +196,33 @@ export class XeroTool implements IXeroTool {
     return inv;
   }
 
+  async attachToInvoice(
+    auth: XeroAuth,
+    invoiceId: string,
+    fileName: string,
+    bytes: Uint8Array,
+    contentType: string,
+  ): Promise<void> {
+    // Attachment upload uses a raw Blob body + the file's content type (not JSON).
+    const path = `/Invoices/${invoiceId}/Attachments/${encodeURIComponent(fileName)}`;
+    const res = await fetch(`${auth.apiBaseUrl}${path}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${auth.accessToken}`,
+        "xero-tenant-id": auth.xeroTenantId,
+        accept: "application/json",
+        "content-type": contentType,
+      },
+      body: new Blob([bytes as BlobPart], { type: contentType }),
+    });
+    if (!res.ok) {
+      throw new Error(
+        `xero attach ${res.status}: ${extractXeroError(await res.text())}`,
+      );
+    }
+    this.logger.info({ invoiceId, fileName }, "attached file to Xero invoice");
+  }
+
   async getAccounts(auth: XeroAuth): Promise<XeroAccount[]> {
     return this.cached(auth, "accounts", async () => {
       const data = await this.request<{ Accounts?: XeroAccount[] }>(
@@ -241,6 +277,7 @@ export class StubXeroTool implements IXeroTool {
   readonly created: XeroInvoiceInput[] = [];
   readonly authorised: string[] = [];
   readonly upserted: { name: string; email?: string }[] = [];
+  readonly attached: { invoiceId: string; fileName: string }[] = [];
 
   constructor(private readonly contacts: XeroContact[] = []) {}
 
@@ -284,10 +321,18 @@ export class StubXeroTool implements IXeroTool {
     return { InvoiceID: invoiceId, Status: "AUTHORISED" };
   }
 
+  async attachToInvoice(
+    _auth: XeroAuth,
+    invoiceId: string,
+    fileName: string,
+  ): Promise<void> {
+    this.attached.push({ invoiceId, fileName });
+  }
+
   async getAccounts(): Promise<XeroAccount[]> {
     return [
-      { Code: "200", Name: "Sales", Type: "REVENUE", Status: "ACTIVE" },
-      { Code: "400", Name: "Expenses", Type: "EXPENSE", Status: "ACTIVE" },
+      { Code: "200", Name: "Sales", Type: "REVENUE", Status: "ACTIVE", TaxType: "OUTPUT" },
+      { Code: "400", Name: "Expenses", Type: "EXPENSE", Status: "ACTIVE", TaxType: "INPUT" },
     ];
   }
 

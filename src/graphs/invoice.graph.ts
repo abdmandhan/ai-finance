@@ -1,6 +1,7 @@
 import {
   INVOICE_NODES,
   makeAskInvoiceClarificationNode,
+  makeAttachInvoiceFileNode,
   makeAuthoriseInvoiceNode,
   makeCreateDraftInvoiceNode,
   makeFinalizeInvoiceNode,
@@ -31,6 +32,7 @@ export function buildInvoiceGraph(
   const clarify = makeAskInvoiceClarificationNode(deps);
   const resolveContact = makeResolveXeroContactNode(deps);
   const createDraft = makeCreateDraftInvoiceNode(deps);
+  const attach = makeAttachInvoiceFileNode(deps);
   const approval = makeInvoiceApprovalNode(deps);
   const authorise = makeAuthoriseInvoiceNode(deps);
   const finalize = makeFinalizeInvoiceNode(deps);
@@ -40,6 +42,7 @@ export function buildInvoiceGraph(
     .addNode(clarify.name, clarify.node)
     .addNode(resolveContact.name, resolveContact.node)
     .addNode(createDraft.name, createDraft.node)
+    .addNode(attach.name, attach.node)
     .addNode(approval.name, approval.node)
     .addNode(authorise.name, authorise.node)
     .addNode(finalize.name, finalize.node)
@@ -62,8 +65,9 @@ export function buildInvoiceGraph(
     .addConditionalEdges(
       INVOICE_NODES.createDraft,
       routeByNextNode,
-      pathMap(INVOICE_NODES.approval, INVOICE_NODES.finalize),
+      pathMap(INVOICE_NODES.attach, INVOICE_NODES.finalize),
     )
+    .addEdge(INVOICE_NODES.attach, INVOICE_NODES.approval)
     .addConditionalEdges(
       INVOICE_NODES.approval,
       routeByNextNode,

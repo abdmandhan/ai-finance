@@ -25,3 +25,8 @@ export {
   type AgentEnablement,
   type ResolveEnablement,
 } from "./agent-enablement";
+export {
+  createFetchAttachment,
+  type FetchAttachment,
+  type FetchedAttachment,
+} from "./media";

@@ -22,6 +22,7 @@ export { makeParseInvoiceNode } from "./parse-invoice";
 export { makeAskInvoiceClarificationNode } from "./ask-invoice-clarification";
 export { makeResolveXeroContactNode } from "./resolve-xero-contact";
 export { makeCreateDraftInvoiceNode } from "./create-draft-invoice";
+export { makeAttachInvoiceFileNode } from "./attach-invoice-file";
 export { makeInvoiceApprovalNode } from "./invoice-approval";
 export { makeAuthoriseInvoiceNode } from "./authorise-invoice";
 export { makeFinalizeInvoiceNode } from "./finalize-invoice";

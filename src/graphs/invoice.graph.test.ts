@@ -29,7 +29,11 @@ const fakeAuth: XeroAuth = {
 };
 
 function buildGraph(
-  opts: { intents?: InvoiceIntent[]; contacts?: XeroContact[] } = {},
+  opts: {
+    intents?: InvoiceIntent[];
+    contacts?: XeroContact[];
+    withFetch?: boolean;
+  } = {},
 ) {
   const logger = pino({ level: "silent" });
   const extract = vi.fn();
@@ -38,6 +42,11 @@ function buildGraph(
   const xeroTool = new StubXeroTool(
     opts.contacts ?? [{ ContactID: "c-acme", Name: "Acme" }],
   );
+  const fetchAttachment = vi.fn(async () => ({
+    bytes: new Uint8Array([1, 2, 3]),
+    contentType: "image/jpeg",
+    dataUrl: "data:image/jpeg;base64,AAA",
+  }));
   const deps: InvoiceDeps = {
     llmService,
     xeroTool,
@@ -47,9 +56,10 @@ function buildGraph(
       expenseAccountCode: "",
       revenueAccountCode: "",
     },
+    ...(opts.withFetch ? { fetchAttachment } : {}),
     logger,
   };
-  return { graph: buildInvoiceGraph(deps, new MemorySaver()), xeroTool };
+  return { graph: buildInvoiceGraph(deps, new MemorySaver()), xeroTool, fetchAttachment };
 }
 
 describe("invoice graph — draft → approve → authorise", () => {
@@ -116,6 +126,35 @@ describe("invoice graph — draft → approve → authorise", () => {
     expect(xeroTool.upserted).toHaveLength(1);
     expect(xeroTool.upserted[0].name).toBe("Acme");
     expect(xeroTool.created).toHaveLength(1);
+  });
+
+  it("reads attached images and attaches the originals to the draft", async () => {
+    const { graph, xeroTool, fetchAttachment } = buildGraph({
+      intents: [intent({ docType: "bill", contactName: "Supplier Co" })],
+      contacts: [{ ContactID: "c-sup", Name: "Supplier Co" }],
+      withFetch: true,
+    });
+    const config = { configurable: { thread_id: "inv-attach" } };
+
+    const paused: any = await graph.invoke(
+      {
+        threadId: "inv-attach",
+        tenantId: "tenant-1",
+        userMessage: "add these invoice to xero",
+        attachments: [
+          { url: "http://minio/a.jpg", mimeType: "image/jpeg", fileName: "a.jpg" },
+          { url: "http://minio/b.jpg", mimeType: "image/jpeg", fileName: "b.jpg" },
+        ],
+      },
+      config,
+    );
+
+    // Read one image per attachment for the vision model (2) + re-fetched per attach (2) = 4.
+    expect(fetchAttachment).toHaveBeenCalled();
+    expect(xeroTool.created).toHaveLength(1);
+    expect(xeroTool.attached).toHaveLength(2);
+    expect(xeroTool.attached.map((a) => a.fileName)).toEqual(["a.jpg", "b.jpg"]);
+    expect(paused.__interrupt__?.[0]?.value?.kind).toBe("approval");
   });
 
   it("creates an ACCPAY bill for a supplier expense", async () => {

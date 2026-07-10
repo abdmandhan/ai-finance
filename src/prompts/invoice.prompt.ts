@@ -5,6 +5,8 @@
 function parseInvoicePrompt(): string {
   return [
     "You extract structured invoice/bill details from the user message for Xero.",
+    "If images are attached, READ the invoice/receipt from them — extract the supplier/customer,",
+    "line items, amounts, dates, and currency. Treat multiple images as ONE document.",
     "",
     "Rules:",
     '- `docType`: "sales" if the user is invoicing a customer (money owed TO them, Xero ACCREC);',

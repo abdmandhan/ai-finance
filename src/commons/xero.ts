@@ -21,28 +21,29 @@ export function resolveOrgDefaults(
   kind: AccountKind,
   cfg: OrgDefaultsConfig,
 ): { accountCode?: string; taxType?: string } {
-  let taxType = cfg.taxType || undefined;
+  const active = accounts.filter((a) => (a.Status ?? "ACTIVE") === "ACTIVE");
+
+  // 1. Pick the account: config override → first active account of the right kind → any active.
+  const overrideCode =
+    kind === "REVENUE" ? cfg.revenueAccountCode : cfg.expenseAccountCode;
+  const wanted =
+    kind === "REVENUE"
+      ? ["REVENUE", "SALES", "OTHERINCOME"]
+      : ["EXPENSE", "OVERHEADS", "DIRECTCOSTS"];
+  const account = overrideCode
+    ? active.find((a) => a.Code === overrideCode)
+    : (active.find((a) => wanted.includes((a.Type ?? "").toUpperCase())) ?? active[0]);
+  const accountCode = overrideCode || account?.Code;
+
+  // 2. Pick the tax: config override → the chosen ACCOUNT's own default TaxType (guaranteed
+  //    compatible with that account) → any 0%/exempt active rate as a last resort.
+  let taxType = cfg.taxType || account?.TaxType || undefined;
   if (!taxType) {
-    const active = taxRates.filter((r) => (r.Status ?? "ACTIVE") === "ACTIVE");
-    const zero = active.find(
+    const activeRates = taxRates.filter((r) => (r.Status ?? "ACTIVE") === "ACTIVE");
+    const zero = activeRates.find(
       (r) => (r.EffectiveRate ?? r.DisplayTaxRate ?? 0) === 0,
     );
-    taxType = (zero ?? active[0])?.TaxType;
-  }
-
-  let accountCode =
-    (kind === "REVENUE" ? cfg.revenueAccountCode : cfg.expenseAccountCode) ||
-    undefined;
-  if (!accountCode) {
-    const wanted =
-      kind === "REVENUE"
-        ? ["REVENUE", "SALES", "OTHERINCOME"]
-        : ["EXPENSE", "OVERHEADS", "DIRECTCOSTS"];
-    const active = accounts.filter((a) => (a.Status ?? "ACTIVE") === "ACTIVE");
-    const match = active.find((a) =>
-      wanted.includes((a.Type ?? "").toUpperCase()),
-    );
-    accountCode = (match ?? active[0])?.Code;
+    taxType = (zero ?? activeRates[0])?.TaxType;
   }
 
   return { accountCode, taxType };
