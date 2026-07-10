@@ -3,9 +3,9 @@
  * Distance Matrix API, authed by a query-param `key` (NOT the OAuth token). When no key is
  * configured the tool returns null (feature off → callers fall back to buffer-only).
  */
-import type { ILogger } from '@/commons';
+import type { ILogger } from "@/commons";
 
-export type TravelMode = 'driving' | 'transit' | 'walking';
+export type TravelMode = "driving" | "transit" | "walking";
 
 export interface TravelTimeResult {
   durationMinutes: number;
@@ -16,10 +16,15 @@ export interface TravelTimeResult {
 }
 
 export interface IMapsTool {
-  travelTime(origin: string, destination: string, mode?: TravelMode): Promise<TravelTimeResult | null>;
+  travelTime(
+    origin: string,
+    destination: string,
+    mode?: TravelMode,
+  ): Promise<TravelTimeResult | null>;
 }
 
-const DISTANCE_MATRIX_URL = 'https://maps.googleapis.com/maps/api/distancematrix/json';
+const DISTANCE_MATRIX_URL =
+  "https://maps.googleapis.com/maps/api/distancematrix/json";
 
 export class GoogleMapsTool implements IMapsTool {
   constructor(
@@ -30,28 +35,38 @@ export class GoogleMapsTool implements IMapsTool {
   async travelTime(
     origin: string,
     destination: string,
-    mode: TravelMode = 'driving',
+    mode: TravelMode = "driving",
   ): Promise<TravelTimeResult | null> {
     if (!this.apiKey) return null;
 
     const url = new URL(DISTANCE_MATRIX_URL);
-    url.searchParams.set('origins', origin);
-    url.searchParams.set('destinations', destination);
-    url.searchParams.set('mode', mode);
-    url.searchParams.set('units', 'metric');
-    url.searchParams.set('key', this.apiKey);
+    url.searchParams.set("origins", origin);
+    url.searchParams.set("destinations", destination);
+    url.searchParams.set("mode", mode);
+    url.searchParams.set("units", "metric");
+    url.searchParams.set("key", this.apiKey);
 
     const res = await fetch(url.toString());
-    if (!res.ok) throw new Error(`Maps Distance Matrix ${res.status}: ${await res.text()}`);
+    if (!res.ok)
+      throw new Error(
+        `Maps Distance Matrix ${res.status}: ${await res.text()}`,
+      );
 
     const data = (await res.json()) as {
       status: string;
-      rows?: { elements?: { status: string; duration?: { value: number }; distance?: { value: number } }[] }[];
+      rows?: {
+        elements?: {
+          status: string;
+          duration?: { value: number };
+          distance?: { value: number };
+        }[];
+      }[];
     };
-    if (data.status !== 'OK') throw new Error(`Maps Distance Matrix error: ${data.status}`);
+    if (data.status !== "OK")
+      throw new Error(`Maps Distance Matrix error: ${data.status}`);
 
     const element = data.rows?.[0]?.elements?.[0];
-    if (!element || element.status !== 'OK') return null;
+    if (!element || element.status !== "OK") return null;
 
     return {
       durationMinutes: Math.ceil((element.duration?.value ?? 0) / 60),
@@ -66,8 +81,18 @@ export class GoogleMapsTool implements IMapsTool {
 /** Offline stub — fixed travel minutes for tests/Studio. */
 export class StubMapsTool implements IMapsTool {
   constructor(private readonly durationMinutes = 10) {}
-  async travelTime(origin: string, destination: string, mode: TravelMode = 'driving') {
-    return { durationMinutes: this.durationMinutes, distanceKm: 5, mode, origin, destination };
+  async travelTime(
+    origin: string,
+    destination: string,
+    mode: TravelMode = "driving",
+  ) {
+    return {
+      durationMinutes: this.durationMinutes,
+      distanceKm: 5,
+      mode,
+      origin,
+      destination,
+    };
   }
 }
 
@@ -78,10 +103,15 @@ export class NoopMapsTool implements IMapsTool {
   }
 }
 
-export function createMapsTool(apiKey: string | undefined, logger: ILogger): IMapsTool {
+export function createMapsTool(
+  apiKey: string | undefined,
+  logger: ILogger,
+): IMapsTool {
   const key = apiKey?.trim() || process.env.OPENCLAW_MAPS_API_KEY?.trim();
   if (!key) {
-    logger.info('Maps API key not set — travel-time checks disabled (buffer-only)');
+    logger.info(
+      "Maps API key not set — travel-time checks disabled (buffer-only)",
+    );
     return new NoopMapsTool();
   }
   return new GoogleMapsTool(key, logger);

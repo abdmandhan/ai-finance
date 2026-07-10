@@ -31,6 +31,22 @@ buffer_minutes = 15
 working_hours_start = 9
 working_hours_end = 18
 
+[xero]
+# Backend endpoint that mints per-tenant Xero access tokens.
+# GET {base}/api/v1/internal/xero/access?tenantId=<id>  ->  { accessToken, xeroTenantId, apiBaseUrl, expiresAt }
+token_endpoint_base_url = "http://localhost:8080"
+# Optional org-default overrides so DRAFT invoices are authorise-ready (else auto-picked from Xero).
+default_tax_type = ""
+default_expense_account_code = ""
+default_revenue_account_code = ""
+
+[agents]
+# Backend endpoint that resolves per-tenant/per-member agent enablement. Used to gate a
+# disabled/paused agent (Scheduling / Invoicing) before its workflow runs.
+# GET {base}/api/v1/internal/agents/enablement?chatId=<id>  ->  { agents: { scheduling, invoicing, expense } }
+# On error the gate fails CLOSED (agent treated as disabled), so point this at a reachable backend.
+enablement_endpoint_base_url = "http://localhost:8080"
+
 [kafka]
 url = "localhost:9092"
 group_id = "tigeri-graph"

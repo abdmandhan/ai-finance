@@ -1,4 +1,4 @@
-import type { Slot } from '@/schemas';
+import type { Slot } from "@/schemas";
 
 /**
  * Pure scheduling math — ported from Agent's `extensions/scheduling/src/prefs.ts`
@@ -22,7 +22,11 @@ export interface SchedulingPrefs {
 
 /** A physical address (usable as a Maps origin/destination) vs a video link or empty. */
 export function isPhysical(loc: unknown): loc is string {
-  return typeof loc === 'string' && loc.trim().length > 0 && !loc.trim().startsWith('http');
+  return (
+    typeof loc === "string" &&
+    loc.trim().length > 0 &&
+    !loc.trim().startsWith("http")
+  );
 }
 
 /** Existing events that overlap [startIso, endIso) — half-open overlap test. */
@@ -42,17 +46,21 @@ export function detectConflicts<T extends { start: string; end: string }>(
 
 /** Local hour-of-day (0-23) for an instant in the given IANA timezone. */
 function localHour(ms: number, timezone: string): number {
-  const parts = new Intl.DateTimeFormat('en-US', {
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
-    hour: 'numeric',
+    hour: "numeric",
     hour12: false,
   }).formatToParts(new Date(ms));
-  const h = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
+  const h = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
   return h === 24 ? 0 : h;
 }
 
 /** Slot fully inside working hours (start hour >= open, end hour <= close, same-day). */
-function inWorkingHours(startMs: number, endMs: number, prefs: SchedulingPrefs): boolean {
+function inWorkingHours(
+  startMs: number,
+  endMs: number,
+  prefs: SchedulingPrefs,
+): boolean {
   const startHour = localHour(startMs, prefs.timezone);
   // Use the end minus 1ms so an event ending exactly at close counts as inside.
   const endHour = localHour(endMs - 1, prefs.timezone);
@@ -95,7 +103,10 @@ export function findFreeSlots(
     while (probe + durationMs <= to && slots.length < count) {
       const end = probe + durationMs;
       if (inWorkingHours(probe, end, prefs)) {
-        slots.push({ start: new Date(probe).toISOString(), end: new Date(end).toISOString() });
+        slots.push({
+          start: new Date(probe).toISOString(),
+          end: new Date(end).toISOString(),
+        });
         probe = end + bufferMs;
       } else {
         probe += stepMs;

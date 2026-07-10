@@ -1,0 +1,33 @@
+/**
+ * Dev-only invoice graph for the LangGraph CLI / Studio. Uses a StubXeroTool + fake auth so it
+ * runs offline (draft → approve → authorise all in-memory). No custom checkpointer (dev server
+ * manages persistence + interrupt resume).
+ */
+import { configUtils, loggerUtils } from "@/commons";
+import { buildInvoiceGraph } from "@/graphs/invoice.graph";
+import { createLlmService } from "@/services/llm.service";
+import type { XeroAuth } from "@/services/xero-auth";
+import { StubXeroTool } from "@/tools/xero.tool";
+
+const config = configUtils.initConfig();
+const logger = loggerUtils.createLogger(config.log);
+
+const fakeAuth: XeroAuth = {
+  accessToken: "stub",
+  xeroTenantId: "stub-tenant",
+  apiBaseUrl: "https://api.xero.com/api.xro/2.0",
+  expiresAtMs: Number.MAX_SAFE_INTEGER,
+};
+
+export const graph = buildInvoiceGraph({
+  llmService: createLlmService(config.llm),
+  xeroTool: new StubXeroTool([{ ContactID: "c-acme", Name: "Acme" }]),
+  resolveXeroAuth: async () => fakeAuth,
+  orgDefaults: {
+    taxType: config.xero.default_tax_type,
+    expenseAccountCode: config.xero.default_expense_account_code,
+    revenueAccountCode: config.xero.default_revenue_account_code,
+  },
+  logger,
+  onProgress: (chatId, event) => logger.info({ chatId, event }, "progress"),
+});

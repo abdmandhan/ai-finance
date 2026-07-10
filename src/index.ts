@@ -1,14 +1,40 @@
-import { configUtils, loggerUtils } from '@/commons';
-import { buildScheduleGraph, type ScheduleGraph } from '@/graphs';
-import { checkpointerUtils } from '@/memory';
-import { type InterruptPayload, type ResumeInput } from '@/nodes';
-import { inboundMessageSchema, type OutboundMessage } from '@/schemas';
-import { createAuditService, createKafkaService, createLlmService, createResolveAuth } from '@/services';
-import { createCalendarTool, createContactsTool, createMapsTool } from '@/tools';
-import type { RunnableConfig } from '@langchain/core/runnables';
-import { Command } from '@langchain/langgraph';
+import { configUtils, loggerUtils } from "@/commons";
+import { buildInvoiceGraph, buildScheduleGraph } from "@/graphs";
+import { checkpointerUtils } from "@/memory";
+import { type InterruptPayload, type ResumeInput } from "@/nodes";
+import {
+  inboundMessageSchema,
+  workflowClassificationSchema,
+  type OutboundMessage,
+} from "@/schemas";
+import { invoicePrompts } from "@/prompts";
+import {
+  createAuditService,
+  createKafkaService,
+  createLlmService,
+  createResolveAuth,
+  createResolveEnablement,
+  createResolveXeroAuth,
+  type AgentEnablement,
+} from "@/services";
+import {
+  createCalendarTool,
+  createContactsTool,
+  createMapsTool,
+  createXeroTool,
+} from "@/tools";
+import { SystemMessage, HumanMessage } from "@langchain/core/messages";
+import type { RunnableConfig } from "@langchain/core/runnables";
+import { Command } from "@langchain/langgraph";
 
-/** Correlation fields echoed from the inbound message onto every outbound reply. */
+type Workflow = "schedule" | "invoice";
+
+/** Minimal graph surface the driver needs — avoids unioning the two giant compiled types. */
+interface RunnableGraph {
+  invoke(input: unknown, config: RunnableConfig): Promise<unknown>;
+  getState(config: RunnableConfig): Promise<unknown>;
+}
+
 interface Correlation {
   requestId: string;
   messageId?: string;
@@ -16,10 +42,31 @@ interface Correlation {
   provider?: string;
 }
 
-/** Pull the pending interrupt payload (if any) off an invoke result. */
+/** Result shape produced by either graph's finalize node. */
+interface GraphResult {
+  status: string;
+  summary: string;
+  eventId?: string;
+  htmlLink?: string;
+  invoiceId?: string;
+  suggestedSlots?: { start: string; end: string }[];
+}
+
 function extractInterrupt(result: unknown): InterruptPayload | null {
-  const interrupts = (result as { __interrupt__?: Array<{ value?: unknown }> })?.__interrupt__;
+  const interrupts = (result as { __interrupt__?: Array<{ value?: unknown }> })
+    ?.__interrupt__;
   return (interrupts?.[0]?.value as InterruptPayload | undefined) ?? null;
+}
+
+function isAffirmative(text: string): boolean {
+  return /^\s*(yes|y|approve|approved|ok|okay|confirm|confirmed|sure|do it|go ahead)\b/i.test(
+    text,
+  );
+}
+
+/** Per-workflow thread namespace so the two graphs' checkpoints never collide on one chat. */
+function threadKey(workflow: Workflow, chatId: string): string {
+  return `${workflow}:${chatId}`;
 }
 
 async function main(): Promise<void> {
@@ -28,11 +75,28 @@ async function main(): Promise<void> {
 
   const kafka = createKafkaService(config, logger);
   const audit = createAuditService(logger);
-  const checkpointer = checkpointerUtils.createCheckpointer(config.database.url, logger);
+  const llmService = createLlmService(config.llm);
+  const resolveEnablement = createResolveEnablement(
+    config.agents.enablement_endpoint_base_url,
+    logger,
+  );
+  const checkpointer = checkpointerUtils.createCheckpointer(
+    config.database.url,
+    logger,
+  );
 
-  const graph: ScheduleGraph = buildScheduleGraph(
+  const onProgress = (
+    chatId: string,
+    event: Parameters<typeof kafka.publishEvent>[1],
+  ) => {
+    kafka
+      .publishEvent(chatId, event)
+      .catch((err) => logger.error({ err }, "publishEvent failed"));
+  };
+
+  const scheduleGraph = buildScheduleGraph(
     {
-      llmService: createLlmService(config.llm),
+      llmService,
       calendarTool: createCalendarTool(logger),
       contactsTool: createContactsTool(logger),
       mapsTool: createMapsTool(config.calendar.maps_api_key, logger),
@@ -44,18 +108,46 @@ async function main(): Promise<void> {
         workingHoursEnd: config.calendar.working_hours_end,
       },
       logger,
-      onProgress: (chatId, event) => {
-        kafka.publishEvent(chatId, event).catch((err) => logger.error({ err }, 'publishEvent failed'));
-      },
+      onProgress,
     },
     checkpointer,
   );
 
+  const invoiceGraph = buildInvoiceGraph(
+    {
+      llmService,
+      xeroTool: createXeroTool(logger),
+      resolveXeroAuth: createResolveXeroAuth(
+        config.xero.token_endpoint_base_url,
+      ),
+      orgDefaults: {
+        taxType: config.xero.default_tax_type,
+        expenseAccountCode: config.xero.default_expense_account_code,
+        revenueAccountCode: config.xero.default_revenue_account_code,
+      },
+      logger,
+      onProgress,
+    },
+    checkpointer,
+  );
+
+  const graphs: Record<Workflow, RunnableGraph> = {
+    schedule: scheduleGraph as unknown as RunnableGraph,
+    invoice: invoiceGraph as unknown as RunnableGraph,
+  };
+  const agentKeyOf: Record<Workflow, string> = {
+    schedule: "scheduling",
+    invoice: "invoicing",
+  };
+  // Which enablement flag gates each workflow (the graph IS that agent).
+  const enablementKeyOf: Record<Workflow, keyof AgentEnablement> = {
+    schedule: "scheduling",
+    invoice: "invoicing",
+  };
+
   await kafka.connect();
 
-  // chatId -> correlation, refreshed on every inbound so outbound replies echo the source.
   const correlations = new Map<string, Correlation>();
-
   function baseOutbound(chatId: string): OutboundMessage {
     const c = correlations.get(chatId);
     return {
@@ -67,110 +159,184 @@ async function main(): Promise<void> {
     };
   }
 
-  /** Is the thread currently paused on an interrupt (i.e. this inbound is a resume)? */
-  async function isPaused(runConfig: RunnableConfig): Promise<boolean> {
-    const snapshot = await graph.getState(runConfig);
-    const tasks = (snapshot as { tasks?: Array<{ interrupts?: unknown[] }> }).tasks ?? [];
-    if (tasks.some((t) => (t.interrupts?.length ?? 0) > 0)) return true;
-    return ((snapshot as { next?: unknown[] }).next?.length ?? 0) > 0;
+  /** Reply that a workflow's agent is disabled for this workspace, and don't run the graph. */
+  async function publishDisabled(
+    workflow: Workflow,
+    chatId: string,
+  ): Promise<void> {
+    const label = workflow === "invoice" ? "Invoicing" : "Scheduling";
+    const text = `The ${label} agent is currently disabled for your workspace.`;
+    await kafka.publishOutbound({
+      ...baseOutbound(chatId),
+      content: [{ type: "text", text }],
+      output: {
+        answer: text,
+        intent: "not_supported",
+        agentKey: agentKeyOf[workflow],
+      },
+    });
+    logger.info({ chatId, workflow }, "agent disabled — gated");
   }
 
-  /** Run a fresh goal or resume a paused thread, then emit the outbound reply/approval. */
-  async function drive(
-    chatId: string,
-    input: Parameters<ScheduleGraph['invoke']>[0],
-  ): Promise<void> {
-    const runConfig: RunnableConfig = { configurable: { thread_id: chatId } };
-    const started = Date.now();
+  /** Which workflow (if any) has a paused interrupt for this chat — i.e. this inbound is a resume. */
+  async function pausedWorkflow(chatId: string): Promise<Workflow | null> {
+    for (const wf of ["invoice", "schedule"] as Workflow[]) {
+      const snapshot = await graphs[wf].getState({
+        configurable: { thread_id: threadKey(wf, chatId) },
+      });
+      const tasks =
+        (snapshot as { tasks?: Array<{ interrupts?: unknown[] }> }).tasks ?? [];
+      const paused =
+        tasks.some((t) => (t.interrupts?.length ?? 0) > 0) ||
+        ((snapshot as { next?: unknown[] }).next?.length ?? 0) > 0;
+      if (paused) return wf;
+    }
+    return null;
+  }
 
-    const result = (await graph.invoke(input, runConfig)) as {
-      result?: {
-        status: string;
-        summary: string;
-        eventId?: string;
-        htmlLink?: string;
-        suggestedSlots?: { start: string; end: string }[];
-      };
-      intent?: string;
-      attendee?: string;
+  /** LLM router: pick the workflow for a fresh inbound message. */
+  async function classify(
+    text: string,
+  ): Promise<"schedule" | "invoice" | "unsupported"> {
+    try {
+      const out = await llmService.extract(
+        workflowClassificationSchema,
+        [
+          new SystemMessage(invoicePrompts.classifyPrompt()),
+          new HumanMessage(text),
+        ],
+        "workflow",
+      );
+      return out.workflow;
+    } catch (err) {
+      logger.error({ err }, "classify failed");
+      return "unsupported";
+    }
+  }
+
+  /** Run/resume a graph, then publish the outbound reply / approval request. */
+  async function drive(
+    workflow: Workflow,
+    chatId: string,
+    input: unknown,
+  ): Promise<void> {
+    const runConfig: RunnableConfig = {
+      configurable: { thread_id: threadKey(workflow, chatId) },
+    };
+    const started = Date.now();
+    const agentKey = agentKeyOf[workflow];
+
+    const raw = (await graphs[workflow].invoke(input, runConfig)) as {
+      result?: GraphResult;
     };
 
-    // The only interrupt left is a clarification (e.g. asking for a missing email).
-    const pending = extractInterrupt(result);
+    const pending = extractInterrupt(raw);
     if (pending) {
-      logger.info({ chatId }, 'graph paused — awaiting user clarification');
-      await kafka.publishOutbound({
-        ...baseOutbound(chatId),
-        content: [{ type: 'text', text: pending.message }],
-        output: { answer: pending.message, intent: 'needs_clarification', agentKey: 'scheduling' },
-      });
+      if (pending.kind === "approval") {
+        await kafka.publishOutbound({
+          ...baseOutbound(chatId),
+          content: [{ type: "text", text: pending.message }],
+          output: {
+            answer: pending.message,
+            intent: "call_tool",
+            agentKey,
+            approvalData: [
+              {
+                ...pending.approval,
+                items: pending.approval.items.map((i) => ({
+                  ...i,
+                  status: "pending" as const,
+                })),
+              },
+            ],
+          },
+        });
+      } else {
+        await kafka.publishOutbound({
+          ...baseOutbound(chatId),
+          content: [{ type: "text", text: pending.message }],
+          output: {
+            answer: pending.message,
+            intent: "needs_clarification",
+            agentKey,
+          },
+        });
+      }
       return;
     }
 
-    const finalResult = result.result ?? { status: 'failed', summary: 'No result produced.' };
+    const result = raw.result ?? {
+      status: "failed",
+      summary: "No result produced.",
+    };
 
-    // Conflict / insufficient travel — propose alternatives, do NOT book.
-    if (finalResult.status === 'proposed') {
-      const slots = finalResult.suggestedSlots ?? [];
+    // Schedule conflict → propose alternatives.
+    if (result.status === "proposed") {
+      const slots = result.suggestedSlots ?? [];
       const list = slots.length
-        ? '\nSome open times:\n' + slots.map((s) => `- ${s.start}`).join('\n')
-        : '';
-      const answer = `${finalResult.summary}${list}`;
+        ? "\nSome open times:\n" + slots.map((s) => `- ${s.start}`).join("\n")
+        : "";
+      const answer = `${result.summary}${list}`;
       await kafka.publishOutbound({
         ...baseOutbound(chatId),
-        content: [{ type: 'text', text: answer }],
-        output: { answer, intent: 'needs_clarification', agentKey: 'scheduling' },
+        content: [{ type: "text", text: answer }],
+        output: { answer, intent: "needs_clarification", agentKey },
       });
-      audit.runFinished({ threadId: chatId, status: 'proposed', durationMs: Date.now() - started });
+      audit.runFinished({
+        threadId: chatId,
+        status: "proposed",
+        durationMs: Date.now() - started,
+      });
       return;
     }
 
-    // Always reply. On success, attach a post-hoc approvalData record (status 'completed') —
-    // the event is already created; this is a backend log, not a gate.
-    const created = finalResult.status === 'created';
-    const answer = created && finalResult.htmlLink
-      ? `${finalResult.summary}\n${finalResult.htmlLink}`
-      : finalResult.summary;
-    const intent =
-      result.intent === 'unsupported' ? 'not_supported' : created ? 'schedule_meeting' : 'not_supported';
+    const created = result.status === "created";
+    const answer =
+      created && result.htmlLink
+        ? `${result.summary}\n${result.htmlLink}`
+        : result.summary;
+    // Post-hoc approvalData record for a completed action (calendar event or authorised invoice).
+    const ref = result.eventId ?? result.invoiceId;
+    const approvalData =
+      created && ref
+        ? [
+            {
+              name:
+                workflow === "invoice"
+                  ? "xero_authorise_invoice"
+                  : "create_calendar_event",
+              provider: workflow === "invoice" ? "xero" : "calendar",
+              items: [
+                { ref, label: result.summary, status: "completed" as const },
+              ],
+            },
+          ]
+        : undefined;
 
     await kafka.publishOutbound({
       ...baseOutbound(chatId),
-      content: [{ type: 'text', text: answer }],
+      content: [{ type: "text", text: answer }],
       output: {
         answer,
-        intent,
-        agentKey: 'scheduling',
-        ...(created && finalResult.eventId
-          ? {
-              approvalData: [
-                {
-                  name: 'create_calendar_event',
-                  provider: 'calendar',
-                  items: [
-                    {
-                      ref: finalResult.eventId,
-                      label: `Meeting with ${result.attendee ?? 'attendee'}`,
-                      status: 'completed' as const,
-                    },
-                  ],
-                },
-              ],
-            }
-          : {}),
+        intent: created ? "call_tool" : "not_supported",
+        agentKey,
+        ...(approvalData ? { approvalData } : {}),
       },
     });
-    audit.runFinished({ threadId: chatId, status: finalResult.status, durationMs: Date.now() - started });
+    audit.runFinished({
+      threadId: chatId,
+      status: result.status,
+      durationMs: Date.now() - started,
+    });
   }
 
-  // Single inbound topic carries both new goals and resume replies (keyed by chatId).
   await kafka.consume(config.kafka.topics.inbound, async (raw) => {
     const msg = inboundMessageSchema.parse(JSON.parse(raw));
     const chatId = msg.chatId;
     const text = msg.content
-      .filter((c) => c.type === 'text' && c.text)
+      .filter((c) => c.type === "text" && c.text)
       .map((c) => c.text as string)
-      .join('\n')
+      .join("\n")
       .trim();
 
     correlations.set(chatId, {
@@ -180,25 +346,65 @@ async function main(): Promise<void> {
       provider: msg.provider,
     });
 
-    const runConfig: RunnableConfig = { configurable: { thread_id: chatId } };
-    if (await isPaused(runConfig)) {
-      const resume: ResumeInput = { reply: text };
-      await drive(chatId, new Command({ resume }));
-    } else {
-      audit.runStarted({ threadId: chatId, workflow: 'schedule', userId: msg.createdBy });
-      await drive(chatId, { threadId: chatId, tenantId: msg.tenantId ?? '', userMessage: text });
+    // Per-tenant/per-member agent gate. Fail-closed (disabled on backend error). Resolved once
+    // here (cached) and reused for both the resume and fresh-goal paths.
+    const enabled = await resolveEnablement({ chatId, tenantId: msg.tenantId });
+
+    // Resume a paused workflow if one is waiting on this chat — gated too, so disabling an agent
+    // mid-conversation stops its paused thread.
+    const paused = await pausedWorkflow(chatId);
+    if (paused) {
+      if (!enabled[enablementKeyOf[paused]]) {
+        await publishDisabled(paused, chatId);
+        return;
+      }
+      const resume: ResumeInput = {
+        reply: text,
+        approved: isAffirmative(text),
+      };
+      await drive(paused, chatId, new Command({ resume }));
+      return;
     }
+
+    // No agent enabled at all → don't even classify (mirrors the Agent's before_agent_reply gate).
+    if (!enabled.scheduling && !enabled.invoicing) {
+      const text2 = "AI agents are currently disabled for your workspace.";
+      await kafka.publishOutbound({
+        ...baseOutbound(chatId),
+        content: [{ type: "text", text: text2 }],
+        output: { answer: text2, intent: "not_supported" },
+      });
+      logger.info({ chatId }, "all agents disabled — gated");
+      return;
+    }
+
+    // Otherwise route a fresh message to a workflow, then gate on that workflow's agent.
+    const workflow = await classify(text);
+    if (workflow === "unsupported") {
+      logger.info({ chatId }, "unsupported request — no reply");
+      return;
+    }
+    if (!enabled[enablementKeyOf[workflow]]) {
+      await publishDisabled(workflow, chatId);
+      return;
+    }
+    audit.runStarted({ threadId: chatId, workflow, userId: msg.createdBy });
+    await drive(workflow, chatId, {
+      threadId: chatId,
+      tenantId: msg.tenantId ?? "",
+      userMessage: text,
+    });
   });
 
-  logger.info('Tigeri graph service running');
+  logger.info("Tigeri graph service running");
 
   const shutdown = async (signal: string) => {
-    logger.info({ signal }, 'shutting down');
+    logger.info({ signal }, "shutting down");
     await kafka.disconnect();
     process.exit(0);
   };
-  process.on('SIGINT', () => void shutdown('SIGINT'));
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
 }
 
 void main();

@@ -3,6 +3,7 @@
   "node_version": "22",
   "dependencies": ["."],
   "graphs": {
-    "schedule": "./src/graphs/schedule-dev.ts:graph"
+    "schedule": "./src/graphs/schedule-dev.ts:graph",
+    "invoice": "./src/graphs/invoice-dev.ts:graph"
   }
 }

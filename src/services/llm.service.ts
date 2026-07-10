@@ -1,9 +1,9 @@
-import type { Config } from '@/commons';
-import { ChatAnthropic } from '@langchain/anthropic';
-import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import type { BaseMessage } from '@langchain/core/messages';
-import { ChatOpenAI } from '@langchain/openai';
-import type { z } from 'zod';
+import type { Config } from "@/commons";
+import { ChatAnthropic } from "@langchain/anthropic";
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import type { BaseMessage } from "@langchain/core/messages";
+import { ChatOpenAI } from "@langchain/openai";
+import type { z } from "zod";
 
 /**
  * Thin wrapper around the chat model. Nodes depend on this interface, not on a
@@ -18,18 +18,22 @@ export interface ILlmService {
   ): Promise<T>;
 }
 
-function buildModel(config: Config['llm']): BaseChatModel {
-  if (config.provider === 'openai') {
+function buildModel(config: Config["llm"]): BaseChatModel {
+  if (config.provider === "openai") {
     // Some GPT-5 reasoning models only accept the default temperature — omit it.
     return new ChatOpenAI({ apiKey: config.api_key, model: config.model });
   }
-  return new ChatAnthropic({ apiKey: config.api_key, model: config.model, temperature: 0 });
+  return new ChatAnthropic({
+    apiKey: config.api_key,
+    model: config.model,
+    temperature: 0,
+  });
 }
 
 export class LlmService implements ILlmService {
   private readonly model: BaseChatModel;
 
-  constructor(config: Config['llm']) {
+  constructor(config: Config["llm"]) {
     this.model = buildModel(config);
   }
 
@@ -43,6 +47,6 @@ export class LlmService implements ILlmService {
   }
 }
 
-export function createLlmService(config: Config['llm']): ILlmService {
+export function createLlmService(config: Config["llm"]): ILlmService {
   return new LlmService(config);
 }

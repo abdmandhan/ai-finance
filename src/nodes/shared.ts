@@ -1,7 +1,13 @@
-import type { ILogger } from '@/commons';
-import type { ProgressEvent } from '@/schemas';
-import type { ILlmService, ResolveAuth } from '@/services';
-import type { ICalendarTool, IContactsTool, IMapsTool } from '@/tools';
+import type { ILogger } from "@/commons";
+import type { OrgDefaultsConfig } from "@/commons";
+import type { ProgressEvent } from "@/schemas";
+import type { ILlmService, ResolveAuth, ResolveXeroAuth } from "@/services";
+import type {
+  ICalendarTool,
+  IContactsTool,
+  IMapsTool,
+  IXeroTool,
+} from "@/tools";
 
 /** Working-hours + buffer prefs driving free-slot search. */
 export interface SchedulingPrefsConfig {
@@ -30,18 +36,36 @@ export interface ScheduleDeps {
 }
 
 /**
- * Payload handed to `interrupt()` — read by the runtime driver to build a
- * `chat.outbound` clarification message. There is no approval interrupt: events
- * are created immediately (approval is recorded post-hoc, not gated).
+ * Payload handed to `interrupt()` — read by the runtime driver to build a `chat.outbound`
+ * message. Scheduling only clarifies; Xero invoicing also gates on an approval (draft →
+ * approve → authorise), carrying structured `approval` data → `output.approvalData`.
  */
-export interface InterruptPayload {
-  kind: 'clarification';
-  message: string;
-}
+export type InterruptPayload =
+  | { kind: "clarification"; message: string }
+  | {
+      kind: "approval";
+      message: string;
+      approval: {
+        name: string;
+        provider: string;
+        items: { ref: string; label?: string }[];
+      };
+    };
 
 /** Resume value threaded back into a paused graph via `Command({ resume })`. */
 export interface ResumeInput {
   reply?: string;
+  approved?: boolean;
+}
+
+/** Dependencies injected into invoice-graph nodes. */
+export interface InvoiceDeps {
+  llmService: ILlmService;
+  xeroTool: IXeroTool;
+  resolveXeroAuth: ResolveXeroAuth;
+  orgDefaults: OrgDefaultsConfig;
+  logger: ILogger;
+  onProgress?: (chatId: string, event: ProgressEvent) => void;
 }
 
 /**
@@ -50,19 +74,40 @@ export interface ResumeInput {
  * loose and conditional-edge path maps accept `Record<string, string>`.
  */
 export const NODES: Record<string, string> = {
-  parseIntent: 'parse_intent',
-  askClarification: 'ask_clarification',
-  resolveContact: 'resolve_contact',
-  searchCalendar: 'search_calendar',
-  findSlot: 'find_slot',
-  createEvent: 'create_event',
-  notify: 'notify',
-  finalize: 'finalize',
+  parseIntent: "parse_intent",
+  askClarification: "ask_clarification",
+  resolveContact: "resolve_contact",
+  searchCalendar: "search_calendar",
+  findSlot: "find_slot",
+  createEvent: "create_event",
+  notify: "notify",
+  finalize: "finalize",
+};
+
+/** Invoice-graph node names. */
+export const INVOICE_NODES: Record<string, string> = {
+  parseInvoice: "parse_invoice",
+  askClarification: "ask_clarification",
+  resolveContact: "resolve_xero_contact",
+  createDraft: "create_draft_invoice",
+  approval: "invoice_approval",
+  authorise: "authorise_invoice",
+  finalize: "finalize_invoice",
 };
 
 export const DEFAULT_DURATION_MINUTES = 30;
 export const MAX_CLARIFY_ATTEMPTS = 2;
 
-export function emitProgress(deps: ScheduleDeps, chatId: string, stage: string, msg: string): void {
-  deps.onProgress?.(chatId, { stage, msg, timestamp: new Date().toISOString() });
+/** Fire-and-forget progress. Works for any deps exposing `onProgress`. */
+export function emitProgress(
+  deps: { onProgress?: (chatId: string, event: ProgressEvent) => void },
+  chatId: string,
+  stage: string,
+  msg: string,
+): void {
+  deps.onProgress?.(chatId, {
+    stage,
+    msg,
+    timestamp: new Date().toISOString(),
+  });
 }

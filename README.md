@@ -282,24 +282,24 @@ Example:
 
 ```ts
 type ScheduleState = {
-    userMessage: string
+  userMessage: string;
 
-    intent?: string
+  intent?: string;
 
-    attendee?: string
+  attendee?: string;
 
-    duration?: number
+  duration?: number;
 
-    timezone?: string
+  timezone?: string;
 
-    availableSlots?: Slot[]
+  availableSlots?: Slot[];
 
-    selectedSlot?: Slot
+  selectedSlot?: Slot;
 
-    approved?: boolean
+  approved?: boolean;
 
-    result?: string
-}
+  result?: string;
+};
 ```
 
 State should remain serializable.
@@ -545,7 +545,7 @@ Finish
 - Auditability First
 - AI Assists, Backend Decides
 
-```
+````
 
 ## One suggestion based on everything we've discussed
 
@@ -564,7 +564,7 @@ agents/
 evaluators/
 workflows/
 events/
-```
+````
 
 Where:
 

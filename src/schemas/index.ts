@@ -6,7 +6,20 @@ export {
   type Slot,
   type ScheduleIntent,
   type ScheduleResult,
-} from './schedule.schema';
+} from "./schedule.schema";
+export {
+  invoiceSchemas,
+  invoiceLineSchema,
+  invoiceIntentSchema,
+  invoiceResultSchema,
+  type InvoiceLine,
+  type InvoiceIntent,
+  type InvoiceResult,
+} from "./invoice.schema";
+export {
+  workflowClassificationSchema,
+  type WorkflowClassification,
+} from "./classify.schema";
 export {
   chatSchemas,
   chatContentSchema,
@@ -23,4 +36,4 @@ export {
   type ApprovalData,
   type ApprovalItem,
   type ProgressEvent,
-} from './chat.schema';
+} from "./chat.schema";

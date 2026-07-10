@@ -5,7 +5,7 @@ export {
   type ICalendarTool,
   type CalendarEvent,
   type CreateEventInput,
-} from './calendar.tool';
+} from "./calendar.tool";
 export {
   createContactsTool,
   DriveContactsTool,
@@ -13,7 +13,7 @@ export {
   type IContactsTool,
   type Contact,
   type SaveContactResult,
-} from './contacts.tool';
+} from "./contacts.tool";
 export {
   createMapsTool,
   GoogleMapsTool,
@@ -22,4 +22,17 @@ export {
   type IMapsTool,
   type TravelMode,
   type TravelTimeResult,
-} from './maps.tool';
+} from "./maps.tool";
+export {
+  createXeroTool,
+  XeroTool,
+  StubXeroTool,
+  type IXeroTool,
+  type InvoiceType,
+  type XeroLineItem,
+  type XeroInvoiceInput,
+  type XeroInvoice,
+  type XeroContact,
+  type XeroAccount,
+  type XeroTaxRate,
+} from "./xero.tool";

@@ -1,11 +1,11 @@
-import { z } from 'zod';
+import { z } from "zod";
 
 /**
  * A concrete calendar availability window returned by the calendar tool.
  */
 export const slotSchema = z.object({
-  start: z.string().describe('ISO 8601 start time'),
-  end: z.string().describe('ISO 8601 end time'),
+  start: z.string().describe("ISO 8601 start time"),
+  end: z.string().describe("ISO 8601 end time"),
 });
 export type Slot = z.infer<typeof slotSchema>;
 
@@ -15,39 +15,52 @@ export type Slot = z.infer<typeof slotSchema>;
  */
 export const scheduleIntentSchema = z.object({
   intent: z
-    .enum(['schedule_meeting', 'unsupported'])
-    .describe('Whether this request is a meeting-scheduling request we can handle'),
-  attendee: z.string().nullable().describe('Who to meet with, e.g. a name'),
+    .enum(["schedule_meeting", "unsupported"])
+    .describe(
+      "Whether this request is a meeting-scheduling request we can handle",
+    ),
+  attendee: z.string().nullable().describe("Who to meet with, e.g. a name"),
   attendeeEmail: z
     .string()
     .nullable()
-    .describe("The attendee's email address if explicitly stated in the message; never guess it"),
+    .describe(
+      "The attendee's email address if explicitly stated in the message; never guess it",
+    ),
   durationMinutes: z
     .number()
     .int()
     .positive()
     .nullable()
-    .describe('Meeting length in minutes, if stated'),
-  timezone: z.string().nullable().describe('IANA timezone, e.g. "Asia/Jakarta", if stated'),
+    .describe("Meeting length in minutes, if stated"),
+  timezone: z
+    .string()
+    .nullable()
+    .describe('IANA timezone, e.g. "Asia/Jakarta", if stated'),
   timeframe: z
     .string()
     .nullable()
-    .describe('Natural-language timeframe, e.g. "next week", "tomorrow afternoon"'),
+    .describe(
+      'Natural-language timeframe, e.g. "next week", "tomorrow afternoon"',
+    ),
   requestedStartIso: z
     .string()
     .nullable()
     .describe(
-      'The concrete meeting start as ISO 8601, resolved from the message relative to the ' +
-        'provided current date/time. Null if no specific day+time was requested.',
+      "The concrete meeting start as ISO 8601, resolved from the message relative to the " +
+        "provided current date/time. Null if no specific day+time was requested.",
     ),
   location: z
     .string()
     .nullable()
-    .describe('Physical meeting address/venue if stated (used for travel time). Video links are NOT a location.'),
+    .describe(
+      "Physical meeting address/venue if stated (used for travel time). Video links are NOT a location.",
+    ),
   clarificationQuestion: z
     .string()
     .nullable()
-    .describe('If required info is missing, the single question to ask the user'),
+    .describe(
+      "If required info is missing, the single question to ask the user",
+    ),
 });
 export type ScheduleIntent = z.infer<typeof scheduleIntentSchema>;
 
@@ -56,7 +69,7 @@ export type ScheduleIntent = z.infer<typeof scheduleIntentSchema>;
  */
 export const scheduleResultSchema = z.object({
   // 'proposed' = not booked; suggestedSlots offered because of a conflict / insufficient travel.
-  status: z.enum(['created', 'cancelled', 'failed', 'proposed']),
+  status: z.enum(["created", "cancelled", "failed", "proposed"]),
   eventId: z.string().optional(),
   htmlLink: z.string().optional(),
   suggestedSlots: z.array(slotSchema).optional(),

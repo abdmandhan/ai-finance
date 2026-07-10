@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from "zod";
 
 /**
  * Zod mirrors of the real Kafka contract (the entire App<->Agent seam). Source of
@@ -10,7 +10,7 @@ import { z } from 'zod';
 // ── Shared content ───────────────────────────────────────────────────
 
 export const chatContentSchema = z.object({
-  type: z.enum(['text', 'photo', 'document']),
+  type: z.enum(["text", "photo", "document"]),
   text: z.string().optional(),
   fileId: z.string().optional(),
   url: z.string().optional(),
@@ -27,7 +27,7 @@ export const inboundMessageSchema = z.object({
   requestId: z.string(),
   chatId: z.string(),
   createdBy: z.string(),
-  role: z.literal('human').default('human'),
+  role: z.literal("human").default("human"),
   content: z.array(chatContentSchema).default(() => []),
   provider: z.string().optional(),
   messageId: z.string().optional(),
@@ -43,7 +43,7 @@ export type InboundMessage = z.infer<typeof inboundMessageSchema>;
 export const approvalItemSchema = z.object({
   ref: z.string(),
   label: z.string().optional(),
-  status: z.enum(['pending', 'completed', 'failed', 'rejected']),
+  status: z.enum(["pending", "completed", "failed", "rejected"]),
   detail: z.string().optional(),
 });
 export type ApprovalItem = z.infer<typeof approvalItemSchema>;

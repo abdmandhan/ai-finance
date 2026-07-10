@@ -9,10 +9,10 @@ import {
   makeSearchCalendarNode,
   NODES,
   type ScheduleDeps,
-} from '@/nodes';
-import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import { END, START, StateGraph } from '@langchain/langgraph';
-import { ScheduleState, type ScheduleStateType } from './schedule.state';
+} from "@/nodes";
+import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
+import { END, START, StateGraph } from "@langchain/langgraph";
+import { ScheduleState, type ScheduleStateType } from "./schedule.state";
 
 export type ScheduleGraph = ReturnType<typeof buildScheduleGraph>;
 
@@ -26,7 +26,10 @@ function pathMap(...names: string[]): Record<string, string> {
   return Object.fromEntries([...names, END].map((n) => [n, n]));
 }
 
-export function buildScheduleGraph(deps: ScheduleDeps, checkpointer?: BaseCheckpointSaver) {
+export function buildScheduleGraph(
+  deps: ScheduleDeps,
+  checkpointer?: BaseCheckpointSaver,
+) {
   const parseIntent = makeParseIntentNode(deps);
   const askClarification = makeAskClarificationNode(deps);
   const resolveContact = makeResolveContactNode(deps);

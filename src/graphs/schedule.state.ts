@@ -1,6 +1,6 @@
-import { scheduleResultSchema, slotSchema } from '@/schemas';
-import { StateSchema, UntrackedValue } from '@langchain/langgraph';
-import { z } from 'zod';
+import { scheduleResultSchema, slotSchema } from "@/schemas";
+import { StateSchema, UntrackedValue } from "@langchain/langgraph";
+import { z } from "zod";
 
 /**
  * State for the schedule-meeting graph. Every field is serializable so the
@@ -11,11 +11,11 @@ import { z } from 'zod';
 export const ScheduleState = new StateSchema({
   // Inputs
   threadId: z.string(),
-  tenantId: z.string().default(''),
+  tenantId: z.string().default(""),
   userMessage: z.string(),
 
   // Extracted entities (see parse-intent node)
-  intent: z.enum(['schedule_meeting', 'unsupported']).optional(),
+  intent: z.enum(["schedule_meeting", "unsupported"]).optional(),
   attendee: z.string().nullish(),
   attendeeEmail: z.string().nullish(),
   durationMinutes: z.number().nullish(),

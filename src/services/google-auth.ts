@@ -7,7 +7,7 @@
 
 export interface CalendarAuth {
   accessToken: string;
-  provider: 'google' | 'microsoft';
+  provider: "google" | "microsoft";
   calendarId: string;
   emailAddress: string;
   expiresAtMs: number;
@@ -19,7 +19,7 @@ export type ResolveAuth = (tenantId: string) => Promise<CalendarAuth>;
 const tokenCache = new Map<string, CalendarAuth>();
 
 export function createResolveAuth(tokenBaseUrl: string): ResolveAuth {
-  const base = tokenBaseUrl.replace(/\/+$/, '');
+  const base = tokenBaseUrl.replace(/\/+$/, "");
 
   return async function resolveAuth(tenantId: string): Promise<CalendarAuth> {
     const now = Date.now();
@@ -31,7 +31,9 @@ export function createResolveAuth(tokenBaseUrl: string): ResolveAuth {
     const url = `${base}/api/v1/internal/calendar/access?tenantId=${encodeURIComponent(tenantId)}`;
     const res = await fetch(url);
     if (!res.ok) {
-      throw new Error(`token endpoint ${res.status}: ${(await res.text()).slice(0, 300)}`);
+      throw new Error(
+        `token endpoint ${res.status}: ${(await res.text()).slice(0, 300)}`,
+      );
     }
     const data = (await res.json()) as {
       accessToken?: string;
@@ -41,15 +43,19 @@ export function createResolveAuth(tokenBaseUrl: string): ResolveAuth {
       expiresAt?: string;
     };
     if (!data.accessToken) {
-      throw new Error('token endpoint returned incomplete auth (need accessToken)');
+      throw new Error(
+        "token endpoint returned incomplete auth (need accessToken)",
+      );
     }
 
     const auth: CalendarAuth = {
       accessToken: data.accessToken,
-      provider: data.provider === 'microsoft' ? 'microsoft' : 'google',
-      calendarId: data.calendarId || 'primary',
+      provider: data.provider === "microsoft" ? "microsoft" : "google",
+      calendarId: data.calendarId || "primary",
       emailAddress: data.emailAddress || tenantId,
-      expiresAtMs: data.expiresAt ? Date.parse(data.expiresAt) : now + 25 * 60_000,
+      expiresAtMs: data.expiresAt
+        ? Date.parse(data.expiresAt)
+        : now + 25 * 60_000,
     };
     tokenCache.set(tenantId, auth);
     return auth;

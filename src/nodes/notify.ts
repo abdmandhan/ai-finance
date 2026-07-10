@@ -1,5 +1,5 @@
-import type { ScheduleStateType } from '@/graphs/schedule.state';
-import { emitProgress, NODES, type ScheduleDeps } from './shared';
+import type { ScheduleStateType } from "@/graphs/schedule.state";
+import { emitProgress, NODES, type ScheduleDeps } from "./shared";
 
 /** Notify the user of the created event, then finalize. */
 export function makeNotifyNode(deps: ScheduleDeps) {
@@ -9,8 +9,8 @@ export function makeNotifyNode(deps: ScheduleDeps) {
       emitProgress(
         deps,
         state.threadId,
-        'notify',
-        state.result?.summary ?? 'Done',
+        "notify",
+        state.result?.summary ?? "Done",
       );
       return { _nextNode: NODES.finalize };
     },
