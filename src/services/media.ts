@@ -26,7 +26,10 @@ export function createFetchAttachment(maxMb = 10): FetchAttachment {
         throw new Error(`attachment exceeds ${maxMb}MB`);
       }
       const bytes = new Uint8Array(ab);
-      const contentType = mimeType || res.headers.get("content-type") || "application/octet-stream";
+      const contentType =
+        mimeType ||
+        res.headers.get("content-type") ||
+        "application/octet-stream";
       const dataUrl = contentType.startsWith("image/")
         ? `data:${contentType};base64,${Buffer.from(bytes).toString("base64")}`
         : undefined;

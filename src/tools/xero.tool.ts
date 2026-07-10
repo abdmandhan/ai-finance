@@ -331,8 +331,20 @@ export class StubXeroTool implements IXeroTool {
 
   async getAccounts(): Promise<XeroAccount[]> {
     return [
-      { Code: "200", Name: "Sales", Type: "REVENUE", Status: "ACTIVE", TaxType: "OUTPUT" },
-      { Code: "400", Name: "Expenses", Type: "EXPENSE", Status: "ACTIVE", TaxType: "INPUT" },
+      {
+        Code: "200",
+        Name: "Sales",
+        Type: "REVENUE",
+        Status: "ACTIVE",
+        TaxType: "OUTPUT",
+      },
+      {
+        Code: "400",
+        Name: "Expenses",
+        Type: "EXPENSE",
+        Status: "ACTIVE",
+        TaxType: "INPUT",
+      },
     ];
   }
 

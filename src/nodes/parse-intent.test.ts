@@ -16,6 +16,8 @@ function buildDeps(over: Partial<ScheduleIntent>): ScheduleDeps {
     requestedStartIso: null,
     location: null,
     clarificationQuestion: null,
+    rangeStartIso: null,
+    rangeEndIso: null,
     ...over,
   };
   return {
@@ -83,6 +85,20 @@ describe("parse-intent node", () => {
     );
     const out = await node.node(baseState);
     expect(out._nextNode).toBe(NODES.askClarification);
+  });
+
+  it("routes a lookup question straight to lookup_schedule with its window", async () => {
+    const node = makeParseIntentNode(
+      buildDeps({
+        intent: "lookup_schedule",
+        rangeStartIso: "2026-07-12T00:00:00.000Z",
+        rangeEndIso: "2026-07-13T00:00:00.000Z",
+      }),
+    );
+    const out = await node.node(baseState);
+    expect(out._nextNode).toBe(NODES.lookupSchedule);
+    expect(out.rangeStartIso).toBe("2026-07-12T00:00:00.000Z");
+    expect(out.rangeEndIso).toBe("2026-07-13T00:00:00.000Z");
   });
 
   it("fails cleanly for unsupported requests", async () => {

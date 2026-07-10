@@ -5,7 +5,8 @@ export const workflowClassificationSchema = z.object({
   workflow: z
     .enum(["schedule", "invoice", "unsupported"])
     .describe(
-      "schedule = book/reschedule a meeting; invoice = create a sales invoice or supplier bill in Xero; unsupported = neither",
+      "schedule = book/reschedule a meeting OR ask about the user's schedule/calendar/meetings; " +
+        "invoice = create a sales invoice or supplier bill in Xero; unsupported = neither",
     ),
 });
 export type WorkflowClassification = z.infer<

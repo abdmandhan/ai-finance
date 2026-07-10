@@ -41,6 +41,19 @@ export function makeParseIntentNode(deps: ScheduleDeps) {
 
       deps.logger.info({ extracted }, "parse-intent result");
 
+      // Schedule lookup — read-only; no clarification round (the node defaults
+      // a missing window to the coming days).
+      if (extracted.intent === "lookup_schedule") {
+        return {
+          intent: extracted.intent,
+          attendee: extracted.attendee ?? state.attendee,
+          timezone: extracted.timezone ?? state.timezone,
+          rangeStartIso: extracted.rangeStartIso,
+          rangeEndIso: extracted.rangeEndIso,
+          _nextNode: NODES.lookupSchedule,
+        };
+      }
+
       // Not a scheduling request — end with a failure result.
       if (extracted.intent === "unsupported") {
         return {

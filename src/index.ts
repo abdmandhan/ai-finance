@@ -293,6 +293,8 @@ async function main(): Promise<void> {
     }
 
     const created = result.status === "created";
+    // Informational reply (schedule lookup) — nothing created, no approvalData.
+    const answered = result.status === "answered";
     const answer =
       created && result.htmlLink
         ? `${result.summary}\n${result.htmlLink}`
@@ -320,7 +322,7 @@ async function main(): Promise<void> {
       content: [{ type: "text", text: answer }],
       output: {
         answer,
-        intent: created ? "call_tool" : "not_supported",
+        intent: created ? "call_tool" : answered ? "ok" : "not_supported",
         agentKey,
         ...(approvalData ? { approvalData } : {}),
       },
@@ -395,7 +397,9 @@ async function main(): Promise<void> {
     const attachments =
       workflow === "invoice"
         ? msg.content
-            .filter((c) => (c.type === "photo" || c.type === "document") && c.url)
+            .filter(
+              (c) => (c.type === "photo" || c.type === "document") && c.url,
+            )
             .map((c) => ({
               url: c.url as string,
               mimeType: c.mimeType ?? "application/octet-stream",

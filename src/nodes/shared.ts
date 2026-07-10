@@ -85,6 +85,7 @@ export const NODES: Record<string, string> = {
   askClarification: "ask_clarification",
   resolveContact: "resolve_contact",
   searchCalendar: "search_calendar",
+  lookupSchedule: "lookup_schedule",
   findSlot: "find_slot",
   createEvent: "create_event",
   notify: "notify",

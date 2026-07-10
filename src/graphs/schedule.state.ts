@@ -15,7 +15,9 @@ export const ScheduleState = new StateSchema({
   userMessage: z.string(),
 
   // Extracted entities (see parse-intent node)
-  intent: z.enum(["schedule_meeting", "unsupported"]).optional(),
+  intent: z
+    .enum(["schedule_meeting", "lookup_schedule", "unsupported"])
+    .optional(),
   attendee: z.string().nullish(),
   attendeeEmail: z.string().nullish(),
   durationMinutes: z.number().nullish(),
@@ -25,6 +27,9 @@ export const ScheduleState = new StateSchema({
   location: z.string().nullish(),
   clarificationQuestion: z.string().nullish(),
   clarifyAttempts: z.number().default(0),
+  // Lookup window (lookup_schedule intent only)
+  rangeStartIso: z.string().nullish(),
+  rangeEndIso: z.string().nullish(),
 
   // Working values
   availableSlots: z.array(slotSchema).optional(),

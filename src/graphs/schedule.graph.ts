@@ -3,6 +3,7 @@ import {
   makeCreateEventNode,
   makeFinalizeNode,
   makeFindSlotNode,
+  makeLookupScheduleNode,
   makeNotifyNode,
   makeParseIntentNode,
   makeResolveContactNode,
@@ -34,6 +35,7 @@ export function buildScheduleGraph(
   const askClarification = makeAskClarificationNode(deps);
   const resolveContact = makeResolveContactNode(deps);
   const searchCalendar = makeSearchCalendarNode(deps);
+  const lookupSchedule = makeLookupScheduleNode(deps);
   const findSlot = makeFindSlotNode(deps);
   const createEvent = makeCreateEventNode(deps);
   const notify = makeNotifyNode(deps);
@@ -44,6 +46,7 @@ export function buildScheduleGraph(
     .addNode(askClarification.name, askClarification.node)
     .addNode(resolveContact.name, resolveContact.node)
     .addNode(searchCalendar.name, searchCalendar.node)
+    .addNode(lookupSchedule.name, lookupSchedule.node)
     .addNode(findSlot.name, findSlot.node)
     .addNode(createEvent.name, createEvent.node)
     .addNode(notify.name, notify.node)
@@ -52,10 +55,17 @@ export function buildScheduleGraph(
     .addConditionalEdges(
       NODES.parseIntent,
       routeByNextNode,
-      pathMap(NODES.askClarification, NODES.resolveContact, NODES.finalize),
+      pathMap(
+        NODES.askClarification,
+        NODES.resolveContact,
+        NODES.lookupSchedule,
+        NODES.finalize,
+      ),
     )
     // After a clarification reply, re-parse with the enriched message.
     .addEdge(NODES.askClarification, NODES.parseIntent)
+    // Lookup answers directly, then ends.
+    .addEdge(NODES.lookupSchedule, NODES.finalize)
     .addConditionalEdges(
       NODES.resolveContact,
       routeByNextNode,

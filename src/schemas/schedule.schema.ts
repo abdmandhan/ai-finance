@@ -15,9 +15,10 @@ export type Slot = z.infer<typeof slotSchema>;
  */
 export const scheduleIntentSchema = z.object({
   intent: z
-    .enum(["schedule_meeting", "unsupported"])
+    .enum(["schedule_meeting", "lookup_schedule", "unsupported"])
     .describe(
-      "Whether this request is a meeting-scheduling request we can handle",
+      "schedule_meeting = book a meeting; lookup_schedule = a question about existing/upcoming " +
+        "meetings or availability; unsupported = neither",
     ),
   attendee: z.string().nullable().describe("Who to meet with, e.g. a name"),
   attendeeEmail: z
@@ -61,6 +62,21 @@ export const scheduleIntentSchema = z.object({
     .describe(
       "If required info is missing, the single question to ask the user",
     ),
+  rangeStartIso: z
+    .string()
+    .nullable()
+    .describe(
+      "For lookup_schedule only: start of the calendar window the user asks about, as ISO 8601, " +
+        "resolved relative to the provided current date/time (e.g. 'tomorrow' -> tomorrow 00:00 " +
+        "local). Null for other intents or when no timeframe is stated.",
+    ),
+  rangeEndIso: z
+    .string()
+    .nullable()
+    .describe(
+      "For lookup_schedule only: end of that window as ISO 8601 (e.g. 'tomorrow' -> the day " +
+        "after 00:00 local; 'this week' -> end of the week). Null when rangeStartIso is null.",
+    ),
 });
 export type ScheduleIntent = z.infer<typeof scheduleIntentSchema>;
 
@@ -69,7 +85,8 @@ export type ScheduleIntent = z.infer<typeof scheduleIntentSchema>;
  */
 export const scheduleResultSchema = z.object({
   // 'proposed' = not booked; suggestedSlots offered because of a conflict / insufficient travel.
-  status: z.enum(["created", "cancelled", "failed", "proposed"]),
+  // 'answered' = informational reply (schedule lookup); nothing was created.
+  status: z.enum(["created", "cancelled", "failed", "proposed", "answered"]),
   eventId: z.string().optional(),
   htmlLink: z.string().optional(),
   suggestedSlots: z.array(slotSchema).optional(),

@@ -26,7 +26,8 @@ const fakeAuth: CalendarAuth = {
 
 export const graph = buildScheduleGraph({
   llmService: createLlmService(config.llm),
-  // Seed a busy event so you can demo a conflict / travel proposal in Studio.
+  // Seed busy events so you can demo a conflict / travel proposal AND a schedule
+  // lookup ("what is my schedule for tomorrow?") in Studio.
   calendarTool: new StubCalendarTool(logger, [
     {
       eventId: "seed-1",
@@ -34,6 +35,19 @@ export const graph = buildScheduleGraph({
       start: "2026-07-13T10:00:00.000Z",
       end: "2026-07-13T11:00:00.000Z",
       location: "10 Downing St, London",
+    },
+    {
+      eventId: "seed-2",
+      summary: "1:1 with Sarah",
+      start: "2026-07-12T09:00:00.000Z",
+      end: "2026-07-12T09:30:00.000Z",
+    },
+    {
+      eventId: "seed-3",
+      summary: "Board review",
+      start: "2026-07-15T13:00:00.000Z",
+      end: "2026-07-15T14:00:00.000Z",
+      location: "HQ, Jakarta",
     },
   ]),
   // Seed one known contact so the happy path runs without a clarification.

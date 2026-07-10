@@ -123,3 +123,85 @@ export function findFreeSlots(
   probeRange(cursor, windowEndMs);
   return slots;
 }
+
+/** An event as rendered by formatSchedule (calendar-tool shape, location optional). */
+export interface ScheduleEntry {
+  summary: string;
+  start: string;
+  end: string;
+  location?: string;
+}
+
+const MAX_SCHEDULE_LINES = 20;
+
+/** "Mon, Jul 13" in the given timezone. */
+function formatDay(ms: number, timezone: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(ms));
+}
+
+/** "10:00" (24h) in the given timezone. */
+function formatTime(ms: number, timezone: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(ms));
+}
+
+/**
+ * Render a schedule-lookup answer: one line per event in the window, in the user's
+ * timezone, optionally filtered by attendee (case-insensitive match on the event
+ * summary — the calendar tool does not expose attendee lists). Pure — unit-testable.
+ */
+export function formatSchedule(
+  events: ScheduleEntry[],
+  windowStartIso: string,
+  windowEndIso: string,
+  timezone: string,
+  attendee?: string | null,
+): string {
+  const needle = attendee?.trim().toLowerCase();
+  const matched = (
+    needle
+      ? events.filter((e) => e.summary.toLowerCase().includes(needle))
+      : events
+  )
+    .slice()
+    .sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+
+  const windowText = `${formatDay(Date.parse(windowStartIso), timezone)} to ${formatDay(
+    Date.parse(windowEndIso) - 1,
+    timezone,
+  )}`;
+  const who = needle ? ` with ${attendee!.trim()}` : "";
+
+  if (matched.length === 0) {
+    return `You have no meetings${who} between ${windowText}.`;
+  }
+
+  const lines = matched.slice(0, MAX_SCHEDULE_LINES).map((e) => {
+    const startMs = Date.parse(e.start);
+    const endMs = Date.parse(e.end);
+    const when = `${formatDay(startMs, timezone)} ${formatTime(startMs, timezone)}–${formatTime(endMs, timezone)}`;
+    const where = isPhysical(e.location) ? ` (@ ${e.location})` : "";
+    return `- ${when} — ${e.summary}${where}`;
+  });
+  const overflow =
+    matched.length > MAX_SCHEDULE_LINES
+      ? [`...and ${matched.length - MAX_SCHEDULE_LINES} more`]
+      : [];
+
+  const count =
+    matched.length === 1 ? "1 meeting" : `${matched.length} meetings`;
+  return [
+    `You have ${count}${who} between ${windowText}:`,
+    ...lines,
+    ...overflow,
+  ].join("\n");
+}

@@ -28,7 +28,9 @@ function parseInvoicePrompt(): string {
 function classifyPrompt(): string {
   return [
     "Classify the user message into one workflow:",
-    '- "schedule": booking, rescheduling, or cancelling a meeting/call/appointment.',
+    '- "schedule": booking, rescheduling, or cancelling a meeting/call/appointment, OR asking',
+    '  about their schedule/calendar/meetings/availability (e.g. "what is my schedule tomorrow?",',
+    '  "do I have meetings on Friday?", "when is my next meeting with Sarah?").',
     '- "invoice": creating a sales invoice (billing a customer) or a supplier bill/expense in Xero.',
     '- "unsupported": anything else.',
     "Return only the workflow.",

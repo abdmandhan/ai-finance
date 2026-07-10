@@ -24,6 +24,8 @@ function intent(over: Partial<ScheduleIntent> = {}): ScheduleIntent {
     requestedStartIso: null,
     location: null,
     clarificationQuestion: null,
+    rangeStartIso: null,
+    rangeEndIso: null,
     ...over,
   };
 }
@@ -321,5 +323,115 @@ describe("schedule graph — conflicts and travel time", () => {
     );
     expect(result.result.status).toBe("created");
     expect(result.selectedSlot.start).toBe("2026-07-13T10:30:00.000Z");
+  });
+});
+
+describe("schedule graph — lookup (read) questions", () => {
+  const lookupIntent = (over: Partial<ScheduleIntent> = {}) =>
+    intent({
+      intent: "lookup_schedule",
+      attendee: null,
+      timeframe: null,
+      durationMinutes: null,
+      rangeStartIso: "2026-07-13T00:00:00.000Z",
+      rangeEndIso: "2026-07-14T00:00:00.000Z",
+      ...over,
+    });
+  const dayEvents = [
+    {
+      eventId: "e1",
+      summary: "Standup",
+      start: "2026-07-13T10:00:00.000Z",
+      end: "2026-07-13T10:15:00.000Z",
+    },
+    {
+      eventId: "e2",
+      summary: "1:1 with Sarah",
+      start: "2026-07-13T14:00:00.000Z",
+      end: "2026-07-13T14:30:00.000Z",
+    },
+  ];
+
+  it("answers with the day's events — nothing booked, no pause", async () => {
+    const { graph } = buildGraph({
+      intents: [lookupIntent()],
+      events: dayEvents,
+    });
+    const config = { configurable: { thread_id: "t-lookup" } };
+
+    const result: any = await graph.invoke(
+      {
+        threadId: "t-lookup",
+        tenantId: "tenant-1",
+        userMessage: "what is my schedule for tomorrow?",
+      },
+      config,
+    );
+
+    expect(result.__interrupt__).toBeUndefined();
+    expect(result.result.status).toBe("answered");
+    expect(result.result.summary).toContain("2 meetings");
+    expect(result.result.summary).toContain("Standup");
+    expect(result.result.summary).toContain("1:1 with Sarah");
+    expect(result.result.eventId).toBeUndefined();
+  });
+
+  it("answers 'no meetings' for an empty calendar", async () => {
+    const { graph } = buildGraph({ intents: [lookupIntent()], events: [] });
+    const result: any = await graph.invoke(
+      {
+        threadId: "t-lookup-empty",
+        tenantId: "tenant-1",
+        userMessage: "do I have meetings tomorrow?",
+      },
+      { configurable: { thread_id: "t-lookup-empty" } },
+    );
+    expect(result.result.status).toBe("answered");
+    expect(result.result.summary).toContain("no meetings");
+  });
+
+  it("filters by attendee for 'when is my next meeting with Sarah?'", async () => {
+    const { graph } = buildGraph({
+      intents: [lookupIntent({ attendee: "Sarah" })],
+      events: dayEvents,
+    });
+    const result: any = await graph.invoke(
+      {
+        threadId: "t-lookup-sarah",
+        tenantId: "tenant-1",
+        userMessage: "when is my next meeting with Sarah?",
+      },
+      { configurable: { thread_id: "t-lookup-sarah" } },
+    );
+    expect(result.result.status).toBe("answered");
+    expect(result.result.summary).toContain("1:1 with Sarah");
+    expect(result.result.summary).not.toContain("Standup");
+  });
+
+  it("defaults to the coming days when no window was stated", async () => {
+    // Event within the next 7 days of "now" (test runs against real clock).
+    const soon = new Date(Date.now() + 24 * 3_600_000);
+    const soonEnd = new Date(soon.getTime() + 30 * 60_000);
+    const { graph } = buildGraph({
+      intents: [lookupIntent({ rangeStartIso: null, rangeEndIso: null })],
+      events: [
+        {
+          eventId: "e3",
+          summary: "Planning",
+          start: soon.toISOString(),
+          end: soonEnd.toISOString(),
+        },
+      ],
+    });
+    const result: any = await graph.invoke(
+      {
+        threadId: "t-lookup-default",
+        tenantId: "tenant-1",
+        userMessage: "what's on my calendar?",
+      },
+      { configurable: { thread_id: "t-lookup-default" } },
+    );
+    expect(result.result.status).toBe("answered");
+    expect(result.result.summary).toContain("Planning");
   });
 });

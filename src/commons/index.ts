@@ -3,8 +3,10 @@ export { loggerUtils, type ILogger } from "./logger";
 export {
   detectConflicts,
   findFreeSlots,
+  formatSchedule,
   isPhysical,
   type BusyEvent,
+  type ScheduleEntry,
   type SchedulingPrefs,
 } from "./scheduling";
 export {

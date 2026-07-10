@@ -59,7 +59,11 @@ function buildGraph(
     ...(opts.withFetch ? { fetchAttachment } : {}),
     logger,
   };
-  return { graph: buildInvoiceGraph(deps, new MemorySaver()), xeroTool, fetchAttachment };
+  return {
+    graph: buildInvoiceGraph(deps, new MemorySaver()),
+    xeroTool,
+    fetchAttachment,
+  };
 }
 
 describe("invoice graph — draft → approve → authorise", () => {
@@ -142,8 +146,16 @@ describe("invoice graph — draft → approve → authorise", () => {
         tenantId: "tenant-1",
         userMessage: "add these invoice to xero",
         attachments: [
-          { url: "http://minio/a.jpg", mimeType: "image/jpeg", fileName: "a.jpg" },
-          { url: "http://minio/b.jpg", mimeType: "image/jpeg", fileName: "b.jpg" },
+          {
+            url: "http://minio/a.jpg",
+            mimeType: "image/jpeg",
+            fileName: "a.jpg",
+          },
+          {
+            url: "http://minio/b.jpg",
+            mimeType: "image/jpeg",
+            fileName: "b.jpg",
+          },
         ],
       },
       config,
@@ -153,7 +165,10 @@ describe("invoice graph — draft → approve → authorise", () => {
     expect(fetchAttachment).toHaveBeenCalled();
     expect(xeroTool.created).toHaveLength(1);
     expect(xeroTool.attached).toHaveLength(2);
-    expect(xeroTool.attached.map((a) => a.fileName)).toEqual(["a.jpg", "b.jpg"]);
+    expect(xeroTool.attached.map((a) => a.fileName)).toEqual([
+      "a.jpg",
+      "b.jpg",
+    ]);
     expect(paused.__interrupt__?.[0]?.value?.kind).toBe("approval");
   });
 

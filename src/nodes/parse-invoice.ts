@@ -26,17 +26,30 @@ export function makeParseInvoiceNode(deps: InvoiceDeps) {
 
       // Build a multimodal message: text + any attached images (downloaded → base64) so a
       // vision model can read the invoice/receipt. All images go in one message (one document).
-      const imageParts: Array<{ type: "image_url"; image_url: { url: string } }> = [];
+      const imageParts: Array<{
+        type: "image_url";
+        image_url: { url: string };
+      }> = [];
       const attachments = state.attachments ?? [];
       if (deps.fetchAttachment && attachments.length) {
-        const images = attachments.filter((a) => a.mimeType?.startsWith("image/")).slice(0, 5);
+        const images = attachments
+          .filter((a) => a.mimeType?.startsWith("image/"))
+          .slice(0, 5);
         for (const a of images) {
           const fetched = await deps.fetchAttachment(a.url, a.mimeType);
           if (fetched?.dataUrl) {
-            imageParts.push({ type: "image_url", image_url: { url: fetched.dataUrl } });
+            imageParts.push({
+              type: "image_url",
+              image_url: { url: fetched.dataUrl },
+            });
           }
         }
-        emitProgress(deps, state.threadId, "parse_invoice", `Read ${imageParts.length} image(s)`);
+        emitProgress(
+          deps,
+          state.threadId,
+          "parse_invoice",
+          `Read ${imageParts.length} image(s)`,
+        );
       }
 
       const humanContent = imageParts.length
