@@ -11,11 +11,13 @@ import { z } from 'zod';
 export const ScheduleState = new StateSchema({
   // Inputs
   threadId: z.string(),
+  tenantId: z.string().default(''),
   userMessage: z.string(),
 
   // Extracted entities (see parse-intent node)
   intent: z.enum(['schedule_meeting', 'unsupported']).optional(),
   attendee: z.string().nullish(),
+  attendeeEmail: z.string().nullish(),
   durationMinutes: z.number().nullish(),
   timezone: z.string().nullish(),
   timeframe: z.string().nullish(),
@@ -25,7 +27,7 @@ export const ScheduleState = new StateSchema({
   // Working values
   availableSlots: z.array(slotSchema).optional(),
   selectedSlot: slotSchema.optional(),
-  approved: z.boolean().optional(),
+  contactSaved: z.boolean().optional(),
 
   // Output
   result: scheduleResultSchema.optional(),

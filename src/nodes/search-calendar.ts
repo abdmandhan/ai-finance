@@ -8,13 +8,24 @@ export function makeSearchCalendarNode(deps: ScheduleDeps) {
     node: async (state: ScheduleStateType) => {
       emitProgress(deps, state.threadId, 'search_calendar', 'Checking availability...');
 
-      const slots = await deps.calendarTool.searchAvailability({
-        attendee: state.attendee ?? '',
-        durationMinutes: state.durationMinutes ?? DEFAULT_DURATION_MINUTES,
-        timeframe: state.timeframe ?? '',
-      });
-
-      return { availableSlots: slots, _nextNode: NODES.findSlot };
+      try {
+        const auth = await deps.resolveAuth(state.tenantId);
+        const slots = await deps.calendarTool.searchAvailability(auth, {
+          durationMinutes: state.durationMinutes ?? DEFAULT_DURATION_MINUTES,
+          timeframe: state.timeframe ?? undefined,
+          timezone: state.timezone ?? undefined,
+        });
+        return { availableSlots: slots, _nextNode: NODES.findSlot };
+      } catch (err) {
+        deps.logger.error({ err }, 'search-calendar failed');
+        return {
+          result: {
+            status: 'failed' as const,
+            summary: 'Could not read your calendar. Please try again later.',
+          },
+          _nextNode: NODES.finalize,
+        };
+      }
     },
   };
 }

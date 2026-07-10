@@ -9,9 +9,9 @@ export {
 } from './shared';
 export { makeParseIntentNode } from './parse-intent';
 export { makeAskClarificationNode } from './ask-clarification';
+export { makeResolveContactNode } from './resolve-contact';
 export { makeSearchCalendarNode } from './search-calendar';
 export { makeFindSlotNode } from './find-slot';
-export { makeApprovalNode } from './approval';
 export { makeCreateEventNode } from './create-event';
 export { makeNotifyNode } from './notify';
 export { makeFinalizeNode } from './finalize';

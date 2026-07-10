@@ -45,16 +45,21 @@ export function makeParseIntentNode(deps: ScheduleDeps) {
       }
 
       const durationMinutes = extracted.durationMinutes ?? DEFAULT_DURATION_MINUTES;
-      const missing = !extracted.attendee || !extracted.timeframe;
+      // Carry forward anything already known (e.g. across a clarification round-trip).
+      const attendee = extracted.attendee ?? state.attendee;
+      const attendeeEmail = extracted.attendeeEmail ?? state.attendeeEmail;
+      const timeframe = extracted.timeframe ?? state.timeframe;
+      const missing = !attendee || !timeframe;
 
       // Ask for missing info, but only up to MAX_CLARIFY_ATTEMPTS to avoid loops.
       if (missing && extracted.clarificationQuestion && state.clarifyAttempts < MAX_CLARIFY_ATTEMPTS) {
         return {
           intent: extracted.intent,
-          attendee: extracted.attendee,
+          attendee,
+          attendeeEmail,
           durationMinutes,
-          timezone: extracted.timezone,
-          timeframe: extracted.timeframe,
+          timezone: extracted.timezone ?? state.timezone,
+          timeframe,
           clarificationQuestion: extracted.clarificationQuestion,
           _nextNode: NODES.askClarification,
         };
@@ -72,14 +77,16 @@ export function makeParseIntentNode(deps: ScheduleDeps) {
         };
       }
 
+      // Resolve the attendee against the contacts book before searching times.
       return {
         intent: extracted.intent,
-        attendee: extracted.attendee,
+        attendee,
+        attendeeEmail,
         durationMinutes,
-        timezone: extracted.timezone,
-        timeframe: extracted.timeframe,
+        timezone: extracted.timezone ?? state.timezone,
+        timeframe,
         clarificationQuestion: null,
-        _nextNode: NODES.searchCalendar,
+        _nextNode: NODES.resolveContact,
       };
     },
   };

@@ -22,14 +22,10 @@ export function makeFindSlotNode(deps: ScheduleDeps) {
       }
 
       const selectedSlot = slots[0];
-      emitProgress(
-        deps,
-        state.threadId,
-        'find_slot',
-        `Proposing ${selectedSlot.start}`,
-      );
+      emitProgress(deps, state.threadId, 'find_slot', `Booking ${selectedSlot.start}`);
 
-      return { selectedSlot, _nextNode: NODES.approval };
+      // No approval gate — go straight to creating the event.
+      return { selectedSlot, _nextNode: NODES.createEvent };
     },
   };
 }

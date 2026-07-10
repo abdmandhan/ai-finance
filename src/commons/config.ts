@@ -20,6 +20,13 @@ const configSchema = z.object({
       url: z.string().default(''),
     })
     .default({ url: '' }),
+  calendar: z
+    .object({
+      // Backend endpoint that mints per-tenant Google access tokens
+      // (GET {base}/api/v1/internal/calendar/access?tenantId=).
+      token_endpoint_base_url: z.string().default('http://localhost:8080'),
+    })
+    .default({ token_endpoint_base_url: 'http://localhost:8080' }),
   kafka: z.object({
     url: z.string().default('localhost:9092'),
     group_id: z.string().default('tigeri-graph'),

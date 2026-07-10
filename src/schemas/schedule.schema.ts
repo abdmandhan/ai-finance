@@ -17,7 +17,11 @@ export const scheduleIntentSchema = z.object({
   intent: z
     .enum(['schedule_meeting', 'unsupported'])
     .describe('Whether this request is a meeting-scheduling request we can handle'),
-  attendee: z.string().nullable().describe('Who to meet with, e.g. a name or email'),
+  attendee: z.string().nullable().describe('Who to meet with, e.g. a name'),
+  attendeeEmail: z
+    .string()
+    .nullable()
+    .describe("The attendee's email address if explicitly stated in the message; never guess it"),
   durationMinutes: z
     .number()
     .int()
@@ -42,6 +46,7 @@ export type ScheduleIntent = z.infer<typeof scheduleIntentSchema>;
 export const scheduleResultSchema = z.object({
   status: z.enum(['created', 'cancelled', 'failed']),
   eventId: z.string().optional(),
+  htmlLink: z.string().optional(),
   summary: z.string(),
 });
 export type ScheduleResult = z.infer<typeof scheduleResultSchema>;

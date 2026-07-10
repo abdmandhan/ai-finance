@@ -3,8 +3,8 @@ import { buildScheduleGraph, type ScheduleGraph } from '@/graphs';
 import { checkpointerUtils } from '@/memory';
 import { type InterruptPayload, type ResumeInput } from '@/nodes';
 import { inboundMessageSchema, type OutboundMessage } from '@/schemas';
-import { createAuditService, createKafkaService, createLlmService } from '@/services';
-import { createCalendarTool } from '@/tools';
+import { createAuditService, createKafkaService, createLlmService, createResolveAuth } from '@/services';
+import { createCalendarTool, createContactsTool } from '@/tools';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { Command } from '@langchain/langgraph';
 
@@ -22,11 +22,6 @@ function extractInterrupt(result: unknown): InterruptPayload | null {
   return (interrupts?.[0]?.value as InterruptPayload | undefined) ?? null;
 }
 
-/** Loose yes/no parse for approval replies arriving as free-text chat messages. */
-function isAffirmative(text: string): boolean {
-  return /^\s*(yes|y|approve|approved|ok|okay|confirm|confirmed|sure|do it)\b/i.test(text);
-}
-
 async function main(): Promise<void> {
   const config = configUtils.initConfig();
   const logger = loggerUtils.createLogger(config.log);
@@ -39,6 +34,8 @@ async function main(): Promise<void> {
     {
       llmService: createLlmService(config.llm),
       calendarTool: createCalendarTool(logger),
+      contactsTool: createContactsTool(logger),
+      resolveAuth: createResolveAuth(config.calendar.token_endpoint_base_url),
       logger,
       onProgress: (chatId, event) => {
         kafka.publishEvent(chatId, event).catch((err) => logger.error({ err }, 'publishEvent failed'));
@@ -80,44 +77,59 @@ async function main(): Promise<void> {
     const started = Date.now();
 
     const result = (await graph.invoke(input, runConfig)) as {
-      result?: { status: string; summary: string; eventId?: string };
+      result?: { status: string; summary: string; eventId?: string; htmlLink?: string };
       intent?: string;
+      attendee?: string;
     };
 
+    // The only interrupt left is a clarification (e.g. asking for a missing email).
     const pending = extractInterrupt(result);
     if (pending) {
-      logger.info({ chatId, kind: pending.kind }, 'graph paused — awaiting user');
-      if (pending.kind === 'approval') {
-        await kafka.publishOutbound({
-          ...baseOutbound(chatId),
-          content: [{ type: 'text', text: pending.message }],
-          output: {
-            answer: pending.message,
-            intent: 'call_tool',
-            agentKey: 'scheduling',
-            approvalData: [
-              { ...pending.approval, items: pending.approval.items.map((i) => ({ ...i, status: 'pending' as const })) },
-            ],
-          },
-        });
-      } else {
-        await kafka.publishOutbound({
-          ...baseOutbound(chatId),
-          content: [{ type: 'text', text: pending.message }],
-          output: { answer: pending.message, intent: 'needs_clarification', agentKey: 'scheduling' },
-        });
-      }
+      logger.info({ chatId }, 'graph paused — awaiting user clarification');
+      await kafka.publishOutbound({
+        ...baseOutbound(chatId),
+        content: [{ type: 'text', text: pending.message }],
+        output: { answer: pending.message, intent: 'needs_clarification', agentKey: 'scheduling' },
+      });
       return;
     }
 
     const finalResult = result.result ?? { status: 'failed', summary: 'No result produced.' };
 
-    // Always reply — including failed/unsupported requests (e.g. "hi" gets the summary).
-    const intent = result.intent === 'unsupported' ? 'not_supported' : 'schedule_meeting';
+    // Always reply. On success, attach a post-hoc approvalData record (status 'completed') —
+    // the event is already created; this is a backend log, not a gate.
+    const created = finalResult.status === 'created';
+    const answer = created && finalResult.htmlLink
+      ? `${finalResult.summary}\n${finalResult.htmlLink}`
+      : finalResult.summary;
+    const intent =
+      result.intent === 'unsupported' ? 'not_supported' : created ? 'schedule_meeting' : 'not_supported';
+
     await kafka.publishOutbound({
       ...baseOutbound(chatId),
-      content: [{ type: 'text', text: finalResult.summary }],
-      output: { answer: finalResult.summary, intent, agentKey: 'scheduling' },
+      content: [{ type: 'text', text: answer }],
+      output: {
+        answer,
+        intent,
+        agentKey: 'scheduling',
+        ...(created && finalResult.eventId
+          ? {
+              approvalData: [
+                {
+                  name: 'create_calendar_event',
+                  provider: 'calendar',
+                  items: [
+                    {
+                      ref: finalResult.eventId,
+                      label: `Meeting with ${result.attendee ?? 'attendee'}`,
+                      status: 'completed' as const,
+                    },
+                  ],
+                },
+              ],
+            }
+          : {}),
+      },
     });
     audit.runFinished({ threadId: chatId, status: finalResult.status, durationMs: Date.now() - started });
   }
@@ -141,11 +153,11 @@ async function main(): Promise<void> {
 
     const runConfig: RunnableConfig = { configurable: { thread_id: chatId } };
     if (await isPaused(runConfig)) {
-      const resume: ResumeInput = { reply: text, approved: isAffirmative(text) };
+      const resume: ResumeInput = { reply: text };
       await drive(chatId, new Command({ resume }));
     } else {
       audit.runStarted({ threadId: chatId, workflow: 'schedule', userId: msg.createdBy });
-      await drive(chatId, { threadId: chatId, userMessage: text });
+      await drive(chatId, { threadId: chatId, tenantId: msg.tenantId ?? '', userMessage: text });
     }
   });
 

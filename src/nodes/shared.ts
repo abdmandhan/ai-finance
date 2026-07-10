@@ -1,12 +1,15 @@
 import type { ILogger } from '@/commons';
 import type { ProgressEvent } from '@/schemas';
-import type { ILlmService } from '@/services';
-import type { ICalendarTool } from '@/tools';
+import type { ILlmService, ResolveAuth } from '@/services';
+import type { ICalendarTool, IContactsTool } from '@/tools';
 
 /** Dependencies injected into every node factory at graph build time. */
 export interface ScheduleDeps {
   llmService: ILlmService;
   calendarTool: ICalendarTool;
+  contactsTool: IContactsTool;
+  /** Resolve per-tenant Google auth (token endpoint). Faked in Studio/tests. */
+  resolveAuth: ResolveAuth;
   logger: ILogger;
   /**
    * Fire-and-forget progress sink (chatId + chat.events payload). Defaults to a
@@ -17,25 +20,17 @@ export interface ScheduleDeps {
 
 /**
  * Payload handed to `interrupt()` — read by the runtime driver to build a
- * `chat.outbound` clarification or approval message.
+ * `chat.outbound` clarification message. There is no approval interrupt: events
+ * are created immediately (approval is recorded post-hoc, not gated).
  */
-export type InterruptPayload =
-  | { kind: 'clarification'; message: string }
-  | {
-      kind: 'approval';
-      message: string;
-      approval: {
-        name: string;
-        provider?: string;
-        items: { ref: string; label?: string }[];
-        args?: unknown;
-      };
-    };
+export interface InterruptPayload {
+  kind: 'clarification';
+  message: string;
+}
 
 /** Resume value threaded back into a paused graph via `Command({ resume })`. */
 export interface ResumeInput {
   reply?: string;
-  approved?: boolean;
 }
 
 /**
@@ -46,9 +41,9 @@ export interface ResumeInput {
 export const NODES: Record<string, string> = {
   parseIntent: 'parse_intent',
   askClarification: 'ask_clarification',
+  resolveContact: 'resolve_contact',
   searchCalendar: 'search_calendar',
   findSlot: 'find_slot',
-  approval: 'approval',
   createEvent: 'create_event',
   notify: 'notify',
   finalize: 'finalize',

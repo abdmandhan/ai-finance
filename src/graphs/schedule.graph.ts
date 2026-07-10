@@ -1,11 +1,11 @@
 import {
-  makeApprovalNode,
   makeAskClarificationNode,
   makeCreateEventNode,
   makeFinalizeNode,
   makeFindSlotNode,
   makeNotifyNode,
   makeParseIntentNode,
+  makeResolveContactNode,
   makeSearchCalendarNode,
   NODES,
   type ScheduleDeps,
@@ -29,9 +29,9 @@ function pathMap(...names: string[]): Record<string, string> {
 export function buildScheduleGraph(deps: ScheduleDeps, checkpointer?: BaseCheckpointSaver) {
   const parseIntent = makeParseIntentNode(deps);
   const askClarification = makeAskClarificationNode(deps);
+  const resolveContact = makeResolveContactNode(deps);
   const searchCalendar = makeSearchCalendarNode(deps);
   const findSlot = makeFindSlotNode(deps);
-  const approval = makeApprovalNode(deps);
   const createEvent = makeCreateEventNode(deps);
   const notify = makeNotifyNode(deps);
   const finalize = makeFinalizeNode(deps);
@@ -39,9 +39,9 @@ export function buildScheduleGraph(deps: ScheduleDeps, checkpointer?: BaseCheckp
   const graph = new StateGraph(ScheduleState)
     .addNode(parseIntent.name, parseIntent.node)
     .addNode(askClarification.name, askClarification.node)
+    .addNode(resolveContact.name, resolveContact.node)
     .addNode(searchCalendar.name, searchCalendar.node)
     .addNode(findSlot.name, findSlot.node)
-    .addNode(approval.name, approval.node)
     .addNode(createEvent.name, createEvent.node)
     .addNode(notify.name, notify.node)
     .addNode(finalize.name, finalize.node)
@@ -49,18 +49,22 @@ export function buildScheduleGraph(deps: ScheduleDeps, checkpointer?: BaseCheckp
     .addConditionalEdges(
       NODES.parseIntent,
       routeByNextNode,
-      pathMap(NODES.askClarification, NODES.searchCalendar, NODES.finalize),
+      pathMap(NODES.askClarification, NODES.resolveContact, NODES.finalize),
     )
     // After a clarification reply, re-parse with the enriched message.
     .addEdge(NODES.askClarification, NODES.parseIntent)
-    .addEdge(NODES.searchCalendar, NODES.findSlot)
     .addConditionalEdges(
-      NODES.findSlot,
+      NODES.resolveContact,
       routeByNextNode,
-      pathMap(NODES.approval, NODES.finalize),
+      pathMap(NODES.askClarification, NODES.searchCalendar, NODES.finalize),
     )
     .addConditionalEdges(
-      NODES.approval,
+      NODES.searchCalendar,
+      routeByNextNode,
+      pathMap(NODES.findSlot, NODES.finalize),
+    )
+    .addConditionalEdges(
+      NODES.findSlot,
       routeByNextNode,
       pathMap(NODES.createEvent, NODES.finalize),
     )
