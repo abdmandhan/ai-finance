@@ -21,12 +21,15 @@ export const ScheduleState = new StateSchema({
   durationMinutes: z.number().nullish(),
   timezone: z.string().nullish(),
   timeframe: z.string().nullish(),
+  requestedStartIso: z.string().nullish(),
+  location: z.string().nullish(),
   clarificationQuestion: z.string().nullish(),
   clarifyAttempts: z.number().default(0),
 
   // Working values
   availableSlots: z.array(slotSchema).optional(),
   selectedSlot: slotSchema.optional(),
+  suggestedSlots: z.array(slotSchema).optional(),
   contactSaved: z.boolean().optional(),
 
   // Output

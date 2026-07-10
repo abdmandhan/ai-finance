@@ -13,6 +13,8 @@ function buildDeps(over: Partial<ScheduleIntent>): ScheduleDeps {
     durationMinutes: null,
     timezone: null,
     timeframe: null,
+    requestedStartIso: null,
+    location: null,
     clarificationQuestion: null,
     ...over,
   };
@@ -20,7 +22,10 @@ function buildDeps(over: Partial<ScheduleIntent>): ScheduleDeps {
     llmService: { extract: vi.fn().mockResolvedValue(intent) } as ILlmService,
     calendarTool: {} as ScheduleDeps['calendarTool'],
     contactsTool: {} as ScheduleDeps['contactsTool'],
+    mapsTool: {} as ScheduleDeps['mapsTool'],
     resolveAuth: (async () => ({}) as never) as ScheduleDeps['resolveAuth'],
+    defaultTimezone: 'UTC',
+    schedulingPrefs: { bufferMinutes: 15, workingHoursStart: 9, workingHoursEnd: 18 },
     logger: pino({ level: 'silent' }),
   };
 }
@@ -43,6 +48,15 @@ describe('parse-intent node', () => {
     const out = await node.node(baseState);
     expect(out.attendeeEmail).toBe('sarah@x.com');
     expect(out._nextNode).toBe(NODES.resolveContact);
+  });
+
+  it('treats a concrete requestedStartIso as the "when" (no NL timeframe needed)', async () => {
+    const node = makeParseIntentNode(
+      buildDeps({ attendee: 'Sarah', timeframe: null, requestedStartIso: '2026-07-12T10:00:00.000Z' }),
+    );
+    const out = await node.node(baseState);
+    expect(out._nextNode).toBe(NODES.resolveContact);
+    expect(out.requestedStartIso).toBe('2026-07-12T10:00:00.000Z');
   });
 
   it('routes to clarification when required info is missing', async () => {

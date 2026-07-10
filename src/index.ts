@@ -4,7 +4,7 @@ import { checkpointerUtils } from '@/memory';
 import { type InterruptPayload, type ResumeInput } from '@/nodes';
 import { inboundMessageSchema, type OutboundMessage } from '@/schemas';
 import { createAuditService, createKafkaService, createLlmService, createResolveAuth } from '@/services';
-import { createCalendarTool, createContactsTool } from '@/tools';
+import { createCalendarTool, createContactsTool, createMapsTool } from '@/tools';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { Command } from '@langchain/langgraph';
 
@@ -35,7 +35,14 @@ async function main(): Promise<void> {
       llmService: createLlmService(config.llm),
       calendarTool: createCalendarTool(logger),
       contactsTool: createContactsTool(logger),
+      mapsTool: createMapsTool(config.calendar.maps_api_key, logger),
       resolveAuth: createResolveAuth(config.calendar.token_endpoint_base_url),
+      defaultTimezone: config.calendar.default_timezone,
+      schedulingPrefs: {
+        bufferMinutes: config.calendar.buffer_minutes,
+        workingHoursStart: config.calendar.working_hours_start,
+        workingHoursEnd: config.calendar.working_hours_end,
+      },
       logger,
       onProgress: (chatId, event) => {
         kafka.publishEvent(chatId, event).catch((err) => logger.error({ err }, 'publishEvent failed'));
@@ -77,7 +84,13 @@ async function main(): Promise<void> {
     const started = Date.now();
 
     const result = (await graph.invoke(input, runConfig)) as {
-      result?: { status: string; summary: string; eventId?: string; htmlLink?: string };
+      result?: {
+        status: string;
+        summary: string;
+        eventId?: string;
+        htmlLink?: string;
+        suggestedSlots?: { start: string; end: string }[];
+      };
       intent?: string;
       attendee?: string;
     };
@@ -95,6 +108,22 @@ async function main(): Promise<void> {
     }
 
     const finalResult = result.result ?? { status: 'failed', summary: 'No result produced.' };
+
+    // Conflict / insufficient travel — propose alternatives, do NOT book.
+    if (finalResult.status === 'proposed') {
+      const slots = finalResult.suggestedSlots ?? [];
+      const list = slots.length
+        ? '\nSome open times:\n' + slots.map((s) => `- ${s.start}`).join('\n')
+        : '';
+      const answer = `${finalResult.summary}${list}`;
+      await kafka.publishOutbound({
+        ...baseOutbound(chatId),
+        content: [{ type: 'text', text: answer }],
+        output: { answer, intent: 'needs_clarification', agentKey: 'scheduling' },
+      });
+      audit.runFinished({ threadId: chatId, status: 'proposed', durationMs: Date.now() - started });
+      return;
+    }
 
     // Always reply. On success, attach a post-hoc approvalData record (status 'completed') —
     // the event is already created; this is a backend log, not a gate.

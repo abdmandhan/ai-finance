@@ -1,33 +1,35 @@
 /**
  * Google Calendar tool — a focused port of Agent's
  * `extensions/scheduling/src/calendar-client.ts` (Google provider only).
- * Free-slot search is a simplified working-hours scan (not Agent's full prefs/buffer/travel
- * algorithm). Tools take a CalendarAuth so the caller controls per-tenant auth.
+ * Exposes list + create; the slot/conflict/travel logic lives in the search-calendar node
+ * (`commons/scheduling.ts`). Tools take a CalendarAuth so the caller controls per-tenant auth.
  */
 import type { ILogger } from '@/commons';
-import type { Slot } from '@/schemas';
 import type { CalendarAuth } from '@/services/google-auth';
+
+export interface CalendarEvent {
+  eventId: string;
+  summary: string;
+  start: string;
+  end: string;
+  location?: string;
+}
 
 export interface CreateEventInput {
   summary: string;
   start: string;
   end: string;
   timeZone?: string;
+  location?: string;
   attendees?: { email: string; name?: string }[];
 }
 
 export interface ICalendarTool {
-  searchAvailability(
-    auth: CalendarAuth,
-    params: { durationMinutes: number; timeframe?: string; timezone?: string },
-  ): Promise<Slot[]>;
+  listEvents(auth: CalendarAuth, timeMinIso: string, timeMaxIso: string): Promise<CalendarEvent[]>;
   createEvent(auth: CalendarAuth, input: CreateEventInput): Promise<{ eventId: string; htmlLink?: string }>;
 }
 
 const GCAL_BASE = 'https://www.googleapis.com/calendar/v3';
-const WORK_START_HOUR = 9;
-const WORK_END_HOUR = 17;
-const MAX_SLOTS = 3;
 
 async function gcalRequest<T = unknown>(
   auth: CalendarAuth,
@@ -49,62 +51,37 @@ async function gcalRequest<T = unknown>(
   return (text ? JSON.parse(text) : {}) as T;
 }
 
-/** Next business day (skips Sat/Sun) at 00:00 UTC. */
-function nextBusinessDayUtc(): Date {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + 1);
-  d.setUTCHours(0, 0, 0, 0);
-  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) {
-    d.setUTCDate(d.getUTCDate() + 1);
-  }
-  return d;
-}
-
 /** Real Google Calendar. */
 export class GoogleCalendarTool implements ICalendarTool {
   constructor(private readonly logger: ILogger) {}
 
-  async searchAvailability(
-    auth: CalendarAuth,
-    params: { durationMinutes: number; timeframe?: string; timezone?: string },
-  ): Promise<Slot[]> {
-    const day = nextBusinessDayUtc();
-    const windowStart = new Date(day);
-    windowStart.setUTCHours(WORK_START_HOUR);
-    const windowEnd = new Date(day);
-    windowEnd.setUTCHours(WORK_END_HOUR);
-
-    // Pull busy intervals for the window.
+  async listEvents(auth: CalendarAuth, timeMinIso: string, timeMaxIso: string): Promise<CalendarEvent[]> {
     const qs = new URLSearchParams({
-      timeMin: windowStart.toISOString(),
-      timeMax: windowEnd.toISOString(),
+      timeMin: timeMinIso,
+      timeMax: timeMaxIso,
       singleEvents: 'true',
       orderBy: 'startTime',
-      maxResults: '50',
+      maxResults: '250',
     });
-    const data = await gcalRequest<{ items?: { start?: { dateTime?: string }; end?: { dateTime?: string } }[] }>(
-      auth,
-      'GET',
-      `/calendars/${encodeURIComponent(auth.calendarId)}/events?${qs}`,
-    );
-    const busy = (data.items ?? [])
-      .map((e) => ({ start: e.start?.dateTime, end: e.end?.dateTime }))
-      .filter((b): b is { start: string; end: string } => Boolean(b.start && b.end))
-      .map((b) => ({ start: Date.parse(b.start), end: Date.parse(b.end) }));
+    const data = await gcalRequest<{
+      items?: {
+        id?: string;
+        summary?: string;
+        location?: string;
+        start?: { dateTime?: string; date?: string };
+        end?: { dateTime?: string; date?: string };
+      }[];
+    }>(auth, 'GET', `/calendars/${encodeURIComponent(auth.calendarId)}/events?${qs}`);
 
-    const durMs = params.durationMinutes * 60_000;
-    const slots: Slot[] = [];
-    // Candidate starts every 30 min inside working hours.
-    for (let t = windowStart.getTime(); t + durMs <= windowEnd.getTime(); t += 30 * 60_000) {
-      const end = t + durMs;
-      const overlaps = busy.some((b) => t < b.end && end > b.start);
-      if (!overlaps) {
-        slots.push({ start: new Date(t).toISOString(), end: new Date(end).toISOString() });
-        if (slots.length >= MAX_SLOTS) break;
-      }
-    }
-    this.logger.info({ count: slots.length }, 'calendar.searchAvailability');
-    return slots;
+    return (data.items ?? [])
+      .map((e) => ({
+        eventId: e.id ?? '',
+        summary: e.summary ?? '(no title)',
+        start: e.start?.dateTime ?? e.start?.date ?? '',
+        end: e.end?.dateTime ?? e.end?.date ?? '',
+        location: e.location,
+      }))
+      .filter((e) => e.start && e.end);
   }
 
   async createEvent(
@@ -115,6 +92,7 @@ export class GoogleCalendarTool implements ICalendarTool {
       summary: input.summary,
       start: { dateTime: input.start, ...(input.timeZone ? { timeZone: input.timeZone } : {}) },
       end: { dateTime: input.end, ...(input.timeZone ? { timeZone: input.timeZone } : {}) },
+      ...(input.location ? { location: input.location } : {}),
       ...(input.attendees?.length
         ? { attendees: input.attendees.map((a) => ({ email: a.email, displayName: a.name })) }
         : {}),
@@ -130,21 +108,17 @@ export class GoogleCalendarTool implements ICalendarTool {
   }
 }
 
-/** Offline stub for Studio / tests — deterministic slots + fake event id. */
+/** Offline stub for Studio / tests — a fixed busy list + a fake event id. */
 export class StubCalendarTool implements ICalendarTool {
-  constructor(private readonly logger: ILogger) {}
+  constructor(
+    private readonly logger: ILogger,
+    private readonly events: CalendarEvent[] = [],
+  ) {}
 
-  async searchAvailability(
-    _auth: CalendarAuth,
-    params: { durationMinutes: number; timeframe?: string; timezone?: string },
-  ): Promise<Slot[]> {
-    const day = nextBusinessDayUtc();
-    return [9, 11, 14].map((h) => {
-      const start = new Date(day);
-      start.setUTCHours(h);
-      const end = new Date(start.getTime() + params.durationMinutes * 60_000);
-      return { start: start.toISOString(), end: end.toISOString() };
-    });
+  async listEvents(_auth: CalendarAuth, timeMinIso: string, timeMaxIso: string): Promise<CalendarEvent[]> {
+    const min = Date.parse(timeMinIso);
+    const max = Date.parse(timeMaxIso);
+    return this.events.filter((e) => Date.parse(e.end) > min && Date.parse(e.start) < max);
   }
 
   async createEvent(

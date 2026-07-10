@@ -1,15 +1,26 @@
 import type { ILogger } from '@/commons';
 import type { ProgressEvent } from '@/schemas';
 import type { ILlmService, ResolveAuth } from '@/services';
-import type { ICalendarTool, IContactsTool } from '@/tools';
+import type { ICalendarTool, IContactsTool, IMapsTool } from '@/tools';
+
+/** Working-hours + buffer prefs driving free-slot search. */
+export interface SchedulingPrefsConfig {
+  bufferMinutes: number;
+  workingHoursStart: number;
+  workingHoursEnd: number;
+}
 
 /** Dependencies injected into every node factory at graph build time. */
 export interface ScheduleDeps {
   llmService: ILlmService;
   calendarTool: ICalendarTool;
   contactsTool: IContactsTool;
+  mapsTool: IMapsTool;
   /** Resolve per-tenant Google auth (token endpoint). Faked in Studio/tests. */
   resolveAuth: ResolveAuth;
+  /** IANA timezone used to anchor relative-time resolution when the message states none. */
+  defaultTimezone: string;
+  schedulingPrefs: SchedulingPrefsConfig;
   logger: ILogger;
   /**
    * Fire-and-forget progress sink (chatId + chat.events payload). Defaults to a

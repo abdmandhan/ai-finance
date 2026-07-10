@@ -61,7 +61,7 @@ export function buildScheduleGraph(deps: ScheduleDeps, checkpointer?: BaseCheckp
     .addConditionalEdges(
       NODES.searchCalendar,
       routeByNextNode,
-      pathMap(NODES.findSlot, NODES.finalize),
+      pathMap(NODES.findSlot, NODES.createEvent, NODES.finalize),
     )
     .addConditionalEdges(
       NODES.findSlot,

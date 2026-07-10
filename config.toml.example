@@ -7,7 +7,7 @@ level = "info"
 # provider: "anthropic" or "openai". api_key + model must match the provider.
 provider = "openai"
 api_key = ""          # OpenAI key (sk-...) when provider = "openai"; Anthropic key otherwise
-model = "gpt-5.4"
+model = "gpt-4o-mini"
 # Anthropic example:
 # provider = "anthropic"
 # model = "claude-sonnet-4-5-20250929"
@@ -21,6 +21,15 @@ url = "postgres://tigerscale:tigerscale@localhost:5432/tigerscale?sslmode=disabl
 # Backend endpoint that mints per-tenant Google access tokens for Calendar + Drive (contacts).
 # GET {base}/api/v1/internal/calendar/access?tenantId=<id>  ->  { accessToken, provider, calendarId, emailAddress, expiresAt }
 token_endpoint_base_url = "http://localhost:8080"
+# IANA timezone used to resolve relative times ("tomorrow at 10") when the message states none.
+default_timezone = "Asia/Jakarta"
+# Google Maps Distance Matrix key for travel-time between back-to-back meetings.
+# Empty -> travel checks disabled (buffer-only). Falls back to OPENCLAW_MAPS_API_KEY env.
+maps_api_key = ""
+# Buffer kept before/after each meeting, and default working hours (local, default_timezone).
+buffer_minutes = 15
+working_hours_start = 9
+working_hours_end = 18
 
 [kafka]
 url = "localhost:9092"

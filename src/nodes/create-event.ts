@@ -27,6 +27,7 @@ export function makeCreateEventNode(deps: ScheduleDeps) {
           start: state.selectedSlot.start,
           end: state.selectedSlot.end,
           timeZone: state.timezone ?? undefined,
+          location: state.location ?? undefined,
           attendees: state.attendeeEmail
             ? [{ email: state.attendeeEmail, name: state.attendee ?? undefined }]
             : undefined,

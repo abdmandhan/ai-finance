@@ -25,8 +25,24 @@ const configSchema = z.object({
       // Backend endpoint that mints per-tenant Google access tokens
       // (GET {base}/api/v1/internal/calendar/access?tenantId=).
       token_endpoint_base_url: z.string().default('http://localhost:8080'),
+      // IANA timezone that anchors relative-time resolution ("tomorrow at 10")
+      // when a message states no timezone.
+      default_timezone: z.string().default('Asia/Jakarta'),
+      // Google Maps API key (Distance Matrix) for travel-time. Empty → travel checks off.
+      maps_api_key: z.string().default(''),
+      // Minutes of buffer kept before/after each meeting when finding free slots.
+      buffer_minutes: z.number().default(15),
+      working_hours_start: z.number().default(9),
+      working_hours_end: z.number().default(18),
     })
-    .default({ token_endpoint_base_url: 'http://localhost:8080' }),
+    .default({
+      token_endpoint_base_url: 'http://localhost:8080',
+      default_timezone: 'Asia/Jakarta',
+      maps_api_key: '',
+      buffer_minutes: 15,
+      working_hours_start: 9,
+      working_hours_end: 18,
+    }),
   kafka: z.object({
     url: z.string().default('localhost:9092'),
     group_id: z.string().default('tigeri-graph'),

@@ -20,8 +20,10 @@ export function makeParseIntentNode(deps: ScheduleDeps) {
     node: async (state: ScheduleStateType) => {
       emitProgress(deps, state.threadId, 'parse_intent', 'Understanding your request...');
 
+      const nowIso = new Date().toISOString();
+      const timezone = state.timezone ?? deps.defaultTimezone;
       const messages = [
-        new SystemMessage(schedulePrompts.parseIntentPrompt()),
+        new SystemMessage(schedulePrompts.parseIntentPrompt({ nowIso, timezone })),
         new HumanMessage(state.userMessage),
       ];
       const extracted = await deps.llmService.extract(
@@ -49,7 +51,10 @@ export function makeParseIntentNode(deps: ScheduleDeps) {
       const attendee = extracted.attendee ?? state.attendee;
       const attendeeEmail = extracted.attendeeEmail ?? state.attendeeEmail;
       const timeframe = extracted.timeframe ?? state.timeframe;
-      const missing = !attendee || !timeframe;
+      const requestedStartIso = extracted.requestedStartIso ?? state.requestedStartIso;
+      const location = extracted.location ?? state.location;
+      // A concrete requested time counts as "when" even without a natural-language timeframe.
+      const missing = !attendee || (!timeframe && !requestedStartIso);
 
       // Ask for missing info, but only up to MAX_CLARIFY_ATTEMPTS to avoid loops.
       if (missing && extracted.clarificationQuestion && state.clarifyAttempts < MAX_CLARIFY_ATTEMPTS) {
@@ -60,6 +65,8 @@ export function makeParseIntentNode(deps: ScheduleDeps) {
           durationMinutes,
           timezone: extracted.timezone ?? state.timezone,
           timeframe,
+          requestedStartIso,
+          location,
           clarificationQuestion: extracted.clarificationQuestion,
           _nextNode: NODES.askClarification,
         };
@@ -85,6 +92,8 @@ export function makeParseIntentNode(deps: ScheduleDeps) {
         durationMinutes,
         timezone: extracted.timezone ?? state.timezone,
         timeframe,
+        requestedStartIso,
+        location,
         clarificationQuestion: null,
         _nextNode: NODES.resolveContact,
       };

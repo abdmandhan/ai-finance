@@ -33,6 +33,17 @@ export const scheduleIntentSchema = z.object({
     .string()
     .nullable()
     .describe('Natural-language timeframe, e.g. "next week", "tomorrow afternoon"'),
+  requestedStartIso: z
+    .string()
+    .nullable()
+    .describe(
+      'The concrete meeting start as ISO 8601, resolved from the message relative to the ' +
+        'provided current date/time. Null if no specific day+time was requested.',
+    ),
+  location: z
+    .string()
+    .nullable()
+    .describe('Physical meeting address/venue if stated (used for travel time). Video links are NOT a location.'),
   clarificationQuestion: z
     .string()
     .nullable()
@@ -44,9 +55,11 @@ export type ScheduleIntent = z.infer<typeof scheduleIntentSchema>;
  * Final result of the schedule workflow.
  */
 export const scheduleResultSchema = z.object({
-  status: z.enum(['created', 'cancelled', 'failed']),
+  // 'proposed' = not booked; suggestedSlots offered because of a conflict / insufficient travel.
+  status: z.enum(['created', 'cancelled', 'failed', 'proposed']),
   eventId: z.string().optional(),
   htmlLink: z.string().optional(),
+  suggestedSlots: z.array(slotSchema).optional(),
   summary: z.string(),
 });
 export type ScheduleResult = z.infer<typeof scheduleResultSchema>;
