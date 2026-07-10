@@ -1,0 +1,33 @@
+[log]
+format = "pretty" # "json" or "pretty"
+level = "info"
+
+[llm]
+# Chat model used by the planner / entity-extraction nodes.
+# provider: "anthropic" or "openai". api_key + model must match the provider.
+provider = "openai"
+api_key = ""          # OpenAI key (sk-...) when provider = "openai"; Anthropic key otherwise
+model = "gpt-5.4"
+# Anthropic example:
+# provider = "anthropic"
+# model = "claude-sonnet-4-5-20250929"
+
+[database]
+# Postgres connection string for the durable LangGraph checkpointer.
+# Leave empty to fall back to an in-memory checkpointer (dev only, no pause/resume durability).
+url = "postgres://tigerscale:tigerscale@localhost:5432/tigerscale?sslmode=disable"
+
+[kafka]
+url = "localhost:9092"
+group_id = "tigeri-graph"
+sasl_enable = false
+sasl_username = ""
+sasl_password = ""
+sasl_mechanism = "PLAIN"
+sasl_protocol = "SASL_SSL"
+
+# The three real topics — the entire App<->Agent contract. chatId is the message key
+[kafka.topics]
+inbound = "chat.inbound"    # consume: user messages (new goals AND resume replies)
+outbound = "chat.outbound"  # produce: AI replies, clarifications, approval requests (output.approvalData)
+events = "chat.events"      # produce: ephemeral progress { stage, msg, timestamp }
