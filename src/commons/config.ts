@@ -2,6 +2,15 @@ import { readFileSync } from "fs";
 import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
 
+const llmTierSchema = (defaultModel: string) =>
+  z
+    .object({
+      url: z.string().default(""),
+      api_key: z.string().default(""),
+      model: z.string().default(defaultModel),
+    })
+    .default({ url: "", api_key: "", model: defaultModel });
+
 const configSchema = z.object({
   log: z
     .object({
@@ -11,11 +20,42 @@ const configSchema = z.object({
         .default("info"),
     })
     .default({ format: "pretty", level: "info" }),
-  llm: z.object({
-    provider: z.enum(["anthropic", "openai"]).default("anthropic"),
-    api_key: z.string().min(1, "llm.api_key is required"),
-    model: z.string().default("claude-sonnet-4-5-20250929"),
-  }),
+  llm: z
+    .object({
+      // Shared defaults; each size tier may override. `model` is "provider:model"
+      // (initChatModel format). `url` is an OpenAI-compatible base URL — leave
+      // empty for hosted providers (Anthropic rejects a custom baseURL).
+      url: z.string().default(""),
+      api_key: z.string().default(""),
+      small: llmTierSchema("anthropic:claude-haiku-4-5"),
+      medium: llmTierSchema("anthropic:claude-sonnet-4-5-20250929"),
+      large: llmTierSchema("anthropic:claude-sonnet-4-5-20250929"),
+    })
+    .prefault({}),
+  redis: z
+    .object({
+      // Empty url → all Redis features off: checkpointer falls back to
+      // Postgres/MemorySaver and the queue pipeline is unavailable.
+      url: z.string().default(""),
+      password: z.string().default(""),
+    })
+    .default({ url: "", password: "" }),
+  worker: z
+    .object({
+      // Queue-backed consumption (requires redis.url). false → direct
+      // Kafka → handler (no dedup/retry/concurrency control).
+      enabled: z.boolean().default(false),
+      keep_completed: z.number().default(100),
+      keep_failed: z.number().default(300),
+      concurrency: z.number().default(10),
+      // Pause Kafka intake while waiting+active+delayed >= this. Keep small:
+      // the wait blocks the consumer poll loop, which must stay under
+      // librdkafka max.poll.interval.ms (5 min) or the consumer is kicked.
+      max_backlog: z.number().default(10),
+      max_attempts: z.number().default(3),
+      job_timeout_ms: z.number().default(300000),
+    })
+    .prefault({}),
   database: z
     .object({
       // Empty url → in-memory checkpointer fallback (see memory/checkpointer.ts).
@@ -61,6 +101,15 @@ const configSchema = z.object({
       default_expense_account_code: "",
       default_revenue_account_code: "",
     }),
+  assistant: z
+    .object({
+      // Hybrid-assistant handler (conversational agent + workflows-as-tools).
+      // false → rollback to the legacy classify() router (see handlers/legacy.handler.ts).
+      enabled: z.boolean().default(true),
+      // Cap on prior conversation messages replayed to the model each turn.
+      max_history_messages: z.number().default(30),
+    })
+    .default({ enabled: true, max_history_messages: 30 }),
   agents: z
     .object({
       // Backend endpoint that resolves per-tenant/per-member agent enablement, used to gate a
@@ -85,11 +134,15 @@ const configSchema = z.object({
         inbound: z.string().default("chat.inbound"),
         outbound: z.string().default("chat.outbound"),
         events: z.string().default("chat.events"),
+        // Dead-letter topic: { error, data } for inbound messages whose
+        // handler failed after retries.
+        inbound_error: z.string().default("chat.inbound.error"),
       })
       .default({
         inbound: "chat.inbound",
         outbound: "chat.outbound",
         events: "chat.events",
+        inbound_error: "chat.inbound.error",
       }),
   }),
 });

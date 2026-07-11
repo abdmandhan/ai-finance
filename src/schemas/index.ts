@@ -32,6 +32,12 @@ export {
   type WorkflowClassification,
 } from "./classify.schema";
 export {
+  assistantSchemas,
+  workflowNameSchema,
+  workflowOutcomeSchema,
+  type AssistantWorkflowOutcome,
+} from "./assistant.schema";
+export {
   chatSchemas,
   chatContentSchema,
   inboundMessageSchema,

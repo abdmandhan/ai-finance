@@ -1,7 +1,39 @@
-export { createLlmService, LlmService, type ILlmService } from "./llm.service";
+export {
+  createLlmService,
+  LlmService,
+  type AgentResult,
+  type ILlmService,
+  type InvokeOptions,
+  type ModelSize,
+} from "./llm.service";
+export {
+  createCacheService,
+  RedisCacheService,
+  type ICacheService,
+} from "./cache.service";
+export {
+  createQueueService,
+  QueueService,
+  type IQueueService,
+} from "./queue.service";
+export {
+  agentKeyOf,
+  createPausedWorkflowCheck,
+  createWorkflowRunner,
+  enablementKeyOf,
+  extractInterrupt,
+  isAffirmative,
+  threadKey,
+  type GraphResult,
+  type RunnableGraph,
+  type RunWorkflow,
+  type Workflow,
+  type WorkflowOutcome,
+} from "./workflow-runner";
 export {
   createKafkaService,
   KafkaService,
+  serializeError,
   type IKafkaService,
   type MessageHandler,
 } from "./kafka.service";

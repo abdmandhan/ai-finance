@@ -1,6 +1,7 @@
 export {
   NODES,
   INVOICE_NODES,
+  ASSISTANT_NODES,
   DEFAULT_DURATION_MINUTES,
   MAX_CLARIFY_ATTEMPTS,
   DEFAULT_POST_ARRIVAL_BUFFER_MINUTES,
@@ -9,9 +10,16 @@ export {
   postArrivalBufferMinutes,
   type ScheduleDeps,
   type InvoiceDeps,
+  type AssistantDeps,
   type InterruptPayload,
   type ResumeInput,
 } from "./shared";
+// Assistant nodes
+export { makeAssistantCallModelNode } from "./assistant-call-model";
+export {
+  makeAssistantExecuteToolsNode,
+  assistantWorkflowTools,
+} from "./assistant-execute-tools";
 export { makeParseIntentNode } from "./parse-intent";
 export { makeAskClarificationNode } from "./ask-clarification";
 export { makeResolveContactNode } from "./resolve-contact";

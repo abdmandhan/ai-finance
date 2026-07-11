@@ -18,6 +18,19 @@ export interface IKafkaService {
   publishOutbound(message: OutboundMessage): Promise<void>;
   /** Publish an ephemeral progress event to chat.events, keyed by chatId. */
   publishEvent(chatId: string, event: ProgressEvent): Promise<void>;
+  /** Dead-letter an inbound message whose handler failed after retries. */
+  publishInboundError(
+    chatId: string,
+    payload: { error: unknown; data: unknown },
+  ): Promise<void>;
+}
+
+/** Errors don't JSON.stringify — flatten to a plain shape first. */
+export function serializeError(error: unknown): unknown {
+  if (error instanceof Error) {
+    return { name: error.name, message: error.message, stack: error.stack };
+  }
+  return error;
 }
 
 export class KafkaService implements IKafkaService {
@@ -97,6 +110,16 @@ export class KafkaService implements IKafkaService {
 
   publishEvent(chatId: string, event: ProgressEvent): Promise<void> {
     return this.send(this.config.kafka.topics.events, chatId, event);
+  }
+
+  publishInboundError(
+    chatId: string,
+    payload: { error: unknown; data: unknown },
+  ): Promise<void> {
+    return this.send(this.config.kafka.topics.inbound_error, chatId, {
+      error: serializeError(payload.error),
+      data: payload.data,
+    });
   }
 
   async disconnect(): Promise<void> {

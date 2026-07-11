@@ -38,18 +38,43 @@ The backend remains the source of truth for business rules and data.
              ┌─────────────────▼─────────────────┐
              │      Tigeri AI (LangGraph)        │
              │                                   │
-             │  Graph Orchestrator               │
-             │  State Management                 │
-             │  Planner                          │
-             │  Tool Executor                    │
-             │  Human Approval                   │
-             │  Memory                           │
+             │  Main Assistant (conversational)  │
+             │    ├─ answers general questions   │
+             │    ├─ conversation memory         │
+             │    └─ workflow tools:             │
+             │         schedule_meeting          │
+             │         create_invoice            │
+             │  Strict Workflow Graphs           │
+             │    ├─ clarification interrupts    │
+             │    └─ human approval interrupts   │
              └─────────────────┬─────────────────┘
                                │
                ┌───────────────┼────────────────┐
                │               │                │
             Xero API      Google APIs       Internal APIs
 ```
+
+## Hybrid assistant
+
+The outer layer is **conversational and agentic**; the inner action layer is
+**strict and deterministic**:
+
+- Every `chat.inbound` message goes to the **main assistant** (`assistant.graph.ts`),
+  a checkpointed agent loop on thread `assistant:<chatId>`. It answers general
+  questions directly and calls a workflow tool only when the user asks for an
+  action or company data.
+- The **workflow graphs** (`schedule.graph.ts`, `invoice.graph.ts`) stay rigid.
+  They run as tools on their own threads (`schedule:<chatId>`, `invoice:<chatId>`)
+  via `services/workflow-runner.ts` — never as subgraphs — so their
+  clarification/approval `interrupt()`s surface as structured tool results.
+- A **paused workflow always wins**: the next inbound message resumes it directly
+  (`handlers/assistant.handler.ts` checks `pausedWorkflow` first). Its final
+  structured result is then phrased naturally by the assistant ("report mode").
+- Structured outcomes drive the Kafka contract (`output.intent`, `approvalData`
+  via `handlers/outbound.ts`); natural language exists only at the conversation
+  boundary.
+- Rollback: `[assistant] enabled = false` in `config.toml` restores the legacy
+  classify() router (`handlers/legacy.handler.ts`).
 
 ---
 
@@ -170,48 +195,51 @@ src/
 
 ├── graphs/
 │
-│   schedule.graph.ts
-│   invoice.graph.ts
-│   expense.graph.ts
-│   email.graph.ts
+│   assistant.graph.ts / assistant.state.ts   (main conversational agent)
+│   schedule.graph.ts / schedule.state.ts
+│   invoice.graph.ts / invoice.state.ts
+│   *-dev.ts                                  (LangGraph Studio harnesses)
 │
 ├── nodes/
 │
-│   parse-intent.node.ts
-│   planner.node.ts
-│   approval.node.ts
-│   execute-tool.node.ts
-│   finalize.node.ts
+│   assistant-call-model.ts
+│   assistant-execute-tools.ts                (workflow tool defs + executor)
+│   parse-intent.ts, ask-clarification.ts, ... (schedule)
+│   parse-invoice.ts, invoice-approval.ts, ... (invoice)
+│   shared.ts                                 (deps, node names, InterruptPayload)
+│
+├── handlers/
+│
+│   assistant.handler.ts                      (hybrid pipeline, default)
+│   legacy.handler.ts                         (classify() router, rollback flag)
+│   outbound.ts                               (outcome -> Kafka output mapping)
 │
 ├── tools/
 │
 │   xero.tool.ts
-│   gmail.tool.ts
 │   calendar.tool.ts
-│   drive.tool.ts
+│   contacts.tool.ts
+│   maps.tool.ts
 │
 ├── prompts/
 │
-│   planner.prompt.ts
-│   schedule.prompt.ts
-│   invoice.prompt.ts
+│   assistant.prompt.ts                       (Tigeri persona — broad)
+│   schedule.prompt.ts, invoice.prompt.ts     (workflow rules — strict)
 │
 ├── memory/
 │
 │   checkpointer.ts
-│   conversation.memory.ts
 │
 ├── schemas/
 │
-│   schedule.schema.ts
-│   invoice.schema.ts
+│   chat.schema.ts                            (Kafka contract)
+│   assistant.schema.ts, schedule.schema.ts, invoice.schema.ts
 │
 ├── services/
 │
 │   kafka.service.ts
-│   audit.service.ts
-│
-├── utils/
+│   workflow-runner.ts                        (graphs-as-tools runner)
+│   llm.service.ts, audit.service.ts, agent-enablement.ts
 │
 └── index.ts
 ```
