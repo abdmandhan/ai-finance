@@ -120,6 +120,10 @@ export function makeParseInvoiceNode(deps: InvoiceDeps) {
         date: extracted.date ?? state.date,
         dueDate: extracted.dueDate ?? state.dueDate,
         currencyCode: extracted.currencyCode ?? state.currencyCode,
+        serviceChargeAmount: extracted.serviceChargeAmount ?? state.serviceChargeAmount,
+        taxRatePercent: extracted.taxRatePercent ?? state.taxRatePercent,
+        taxAmount: extracted.taxAmount ?? state.taxAmount,
+        amountsAreTaxInclusive: extracted.amountsAreTaxInclusive ?? state.amountsAreTaxInclusive,
         clarificationQuestion: null,
         _nextNode: INVOICE_NODES.resolveContact,
       };

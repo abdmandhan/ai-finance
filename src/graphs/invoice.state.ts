@@ -26,6 +26,10 @@ export const InvoiceState = new StateSchema({
   date: z.string().nullish(),
   dueDate: z.string().nullish(),
   currencyCode: z.string().nullish(),
+  serviceChargeAmount: z.number().nullish(),
+  taxRatePercent: z.number().nullish(),
+  taxAmount: z.number().nullish(),
+  amountsAreTaxInclusive: z.boolean().nullish(),
   clarificationQuestion: z.string().nullish(),
   clarifyAttempts: z.number().default(0),
 

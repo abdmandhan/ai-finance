@@ -18,9 +18,16 @@ function parseInvoicePrompt(): string {
     "  (tax-EXCLUSIVE unit price). Empty array if none are stated.",
     "- `reference`, `date` (YYYY-MM-DD), `dueDate` (YYYY-MM-DD), `currencyCode` (ISO): only when",
     "  clearly stated; else null. Do not invent values.",
+    "- `serviceChargeAmount`: the service charge total if the document shows one (e.g. '10% service",
+    "  charge'); else null. This is a charge, NOT tax.",
+    "- `taxRatePercent`: the GST/VAT/tax rate percent shown, e.g. 9. `taxAmount`: the tax total",
+    "  shown. Both null if the document has no tax.",
+    "- `amountsAreTaxInclusive`: true if the line prices already INCLUDE tax (receipt says",
+    "  'inclusive of GST', or the printed total equals the sum of line prices); false if there is a",
+    "  subtotal plus a separate tax line added on top. Default false when unsure.",
     "- If `contactName` OR `lineItems` is missing, set `clarificationQuestion` to a single specific",
     "  question asking for exactly what is missing. Otherwise set it to null.",
-    "- Never guess account codes or tax — the service auto-fills those from the Xero org.",
+    "- Never guess account codes or the tax TYPE — the service auto-fills those from the Xero org.",
   ].join("\n");
 }
 

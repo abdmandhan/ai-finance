@@ -12,6 +12,8 @@ export {
 export {
   resolveOrgDefaults,
   applyLineDefaults,
+  matchTaxRate,
+  taxRatePercentOf,
   type OrgDefaultsConfig,
   type AccountKind,
 } from "./xero";

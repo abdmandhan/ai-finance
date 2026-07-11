@@ -37,6 +37,23 @@ export const invoiceIntentSchema = z.object({
     .string()
     .nullable()
     .describe("ISO currency, e.g. SGD, if stated"),
+  serviceChargeAmount: z
+    .number()
+    .nullable()
+    .describe("Service charge total shown on the document, if any (a separate charge, not tax)"),
+  taxRatePercent: z
+    .number()
+    .nullable()
+    .describe("GST/VAT/tax rate percent shown, e.g. 9 for 9%. Null if no tax."),
+  taxAmount: z
+    .number()
+    .nullable()
+    .describe("Total tax/GST amount shown on the document, for verification. Null if none."),
+  amountsAreTaxInclusive: z
+    .boolean()
+    .describe(
+      "True if the line prices already INCLUDE the tax (receipt says 'incl. GST', or total = sum of lines). False if a subtotal + separate tax line is shown.",
+    ),
   clarificationQuestion: z
     .string()
     .nullable()

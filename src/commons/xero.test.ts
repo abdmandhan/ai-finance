@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { applyLineDefaults, resolveOrgDefaults } from "./xero";
+import {
+  applyLineDefaults,
+  matchTaxRate,
+  resolveOrgDefaults,
+  taxRatePercentOf,
+} from "./xero";
 import type { XeroAccount, XeroTaxRate } from "@/tools";
 
 const cfg = { taxType: "", expenseAccountCode: "", revenueAccountCode: "" };
@@ -52,6 +57,18 @@ describe("resolveOrgDefaults", () => {
     ];
     const out = resolveOrgDefaults(noTax, taxRates, "REVENUE", cfg);
     expect(out.taxType).toBe("GSTONIMPORTS");
+  });
+
+  it("matchTaxRate finds a rate by percent, taxRatePercentOf reads it back", () => {
+    const rates: XeroTaxRate[] = [
+      { TaxType: "NONE", EffectiveRate: 0, Status: "ACTIVE" },
+      { TaxType: "GST9", EffectiveRate: 9, Status: "ACTIVE" },
+    ];
+    expect(matchTaxRate(rates, 9)).toBe("GST9");
+    expect(matchTaxRate(rates, 7)).toBeUndefined();
+    expect(taxRatePercentOf(rates, "GST9")).toBe(9);
+    expect(taxRatePercentOf(rates, "NONE")).toBe(0);
+    expect(taxRatePercentOf(rates, undefined)).toBe(0);
   });
 
   it("applyLineDefaults fills only missing fields", () => {

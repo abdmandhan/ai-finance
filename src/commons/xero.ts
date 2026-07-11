@@ -52,6 +52,22 @@ export function resolveOrgDefaults(
   return { accountCode, taxType };
 }
 
+/** TaxType of an ACTIVE rate whose effective percent ≈ `percent` (undefined if none). */
+export function matchTaxRate(taxRates: XeroTaxRate[], percent: number): string | undefined {
+  const active = taxRates.filter((r) => (r.Status ?? "ACTIVE") === "ACTIVE");
+  const hit = active.find(
+    (r) => Math.abs((r.EffectiveRate ?? r.DisplayTaxRate ?? -1) - percent) < 0.01,
+  );
+  return hit?.TaxType;
+}
+
+/** Effective percent of a given TaxType (0 if unknown). */
+export function taxRatePercentOf(taxRates: XeroTaxRate[], taxType: string | undefined): number {
+  if (!taxType) return 0;
+  const r = taxRates.find((t) => t.TaxType === taxType);
+  return r?.EffectiveRate ?? r?.DisplayTaxRate ?? 0;
+}
+
 /** Fill any line missing AccountCode/TaxType with the resolved org defaults (in place). */
 export function applyLineDefaults(
   lines: XeroLineItem[],

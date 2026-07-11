@@ -1,5 +1,10 @@
 import type { InvoiceStateType } from "@/graphs/invoice.state";
-import { applyLineDefaults, resolveOrgDefaults } from "@/commons";
+import {
+  applyLineDefaults,
+  matchTaxRate,
+  resolveOrgDefaults,
+  taxRatePercentOf,
+} from "@/commons";
 import type { XeroInvoiceInput, XeroLineItem } from "@/tools";
 import { emitProgress, INVOICE_NODES, type InvoiceDeps } from "./shared";
 
@@ -41,21 +46,40 @@ export function makeCreateDraftInvoiceNode(deps: InvoiceDeps) {
           deps.xeroTool.getAccounts(auth),
           deps.xeroTool.getTaxRates(auth),
         ]);
-        applyLineDefaults(
-          lines,
-          resolveOrgDefaults(
-            accounts,
-            taxRates,
-            isSales ? "REVENUE" : "EXPENSE",
-            deps.orgDefaults,
-          ),
+
+        const defaults = resolveOrgDefaults(
+          accounts,
+          taxRates,
+          isSales ? "REVENUE" : "EXPENSE",
+          deps.orgDefaults,
         );
+        // Apply the receipt's GST: if the org account's default tax is 0% but the document shows a
+        // tax rate, override with a matching Xero rate so GST actually posts. Otherwise keep the
+        // account default (which is account-compatible — see the tax/account fix).
+        let taxType = defaults.taxType;
+        const wantPercent = state.taxRatePercent ?? 0;
+        if (wantPercent > 0 && taxRatePercentOf(taxRates, taxType) === 0) {
+          taxType = matchTaxRate(taxRates, wantPercent) ?? taxType;
+        }
+        applyLineDefaults(lines, { accountCode: defaults.accountCode, taxType });
+
+        // Service charge is a genuine line (taxed like the goods), not a tax.
+        if (state.serviceChargeAmount && state.serviceChargeAmount > 0) {
+          lines.push({
+            Description: "Service charge",
+            Quantity: 1,
+            UnitAmount: state.serviceChargeAmount,
+            ...(defaults.accountCode ? { AccountCode: defaults.accountCode } : {}),
+            ...(taxType ? { TaxType: taxType } : {}),
+          });
+        }
 
         const invoice: XeroInvoiceInput = {
           Type: isSales ? "ACCREC" : "ACCPAY",
           Contact: { ContactID: state.contactId },
           LineItems: lines,
           Status: "DRAFT",
+          LineAmountTypes: state.amountsAreTaxInclusive ? "Inclusive" : "Exclusive",
           ...(state.reference ? { Reference: state.reference } : {}),
           ...(state.date ? { Date: state.date } : {}),
           ...(state.dueDate ? { DueDate: state.dueDate } : {}),

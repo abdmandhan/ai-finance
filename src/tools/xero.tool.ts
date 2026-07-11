@@ -25,6 +25,8 @@ export interface XeroInvoiceInput {
   Date?: string;
   DueDate?: string;
   CurrencyCode?: string;
+  /** Whether line UnitAmounts include tax. Inclusive → Xero back-computes GST. */
+  LineAmountTypes?: "Exclusive" | "Inclusive" | "NoTax";
 }
 
 export interface XeroInvoice {
@@ -349,7 +351,10 @@ export class StubXeroTool implements IXeroTool {
   }
 
   async getTaxRates(): Promise<XeroTaxRate[]> {
-    return [{ TaxType: "NONE", EffectiveRate: 0, Status: "ACTIVE" }];
+    return [
+      { TaxType: "NONE", EffectiveRate: 0, Status: "ACTIVE" },
+      { TaxType: "GST9", EffectiveRate: 9, Status: "ACTIVE" },
+    ];
   }
 }
 

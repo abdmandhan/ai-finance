@@ -16,6 +16,10 @@ function intent(over: Partial<InvoiceIntent> = {}): InvoiceIntent {
     date: null,
     dueDate: null,
     currencyCode: null,
+    serviceChargeAmount: null,
+    taxRatePercent: null,
+    taxAmount: null,
+    amountsAreTaxInclusive: false,
     clarificationQuestion: null,
     ...over,
   };
@@ -170,6 +174,41 @@ describe("invoice graph — draft → approve → authorise", () => {
       "b.jpg",
     ]);
     expect(paused.__interrupt__?.[0]?.value?.kind).toBe("approval");
+  });
+
+  it("reads GST + service charge onto the draft", async () => {
+    const { graph, xeroTool } = buildGraph({
+      intents: [
+        intent({
+          docType: "bill",
+          contactName: "Supplier Co",
+          taxRatePercent: 9,
+          taxAmount: 12.5,
+          serviceChargeAmount: 10,
+          amountsAreTaxInclusive: true,
+        }),
+      ],
+      contacts: [{ ContactID: "c-sup", Name: "Supplier Co" }],
+    });
+    const config = { configurable: { thread_id: "inv-gst" } };
+
+    await graph.invoke(
+      {
+        threadId: "inv-gst",
+        tenantId: "tenant-1",
+        userMessage: "add this receipt",
+      },
+      config,
+    );
+
+    const inv = xeroTool.created[0];
+    expect(inv.LineAmountTypes).toBe("Inclusive");
+    // Goods line picked up the matched GST rate (account default is 0% in the stub).
+    expect(inv.LineItems[0].TaxType).toBe("GST9");
+    // Service charge added as its own taxed line.
+    const svc = inv.LineItems.find((l) => l.Description === "Service charge");
+    expect(svc?.UnitAmount).toBe(10);
+    expect(svc?.TaxType).toBe("GST9");
   });
 
   it("creates an ACCPAY bill for a supplier expense", async () => {

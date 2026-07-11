@@ -17,7 +17,19 @@ export function makeInvoiceApprovalNode(deps: InvoiceDeps) {
     name: INVOICE_NODES.approval,
     node: async (state: InvoiceStateType) => {
       const kind = state.docType === "sales" ? "invoice" : "bill";
-      const message = `Draft ${kind} for ${state.contactName} is ready. Reply 'approve' to authorise, or tell me what to change.`;
+      // Surface what was read from the document so the user can verify before authorising.
+      const extras: string[] = [];
+      if (state.serviceChargeAmount && state.serviceChargeAmount > 0) {
+        extras.push(`service charge ${state.serviceChargeAmount}`);
+      }
+      if (state.taxRatePercent && state.taxRatePercent > 0) {
+        const incl = state.amountsAreTaxInclusive ? "incl." : "plus";
+        extras.push(
+          `${incl} ${state.taxRatePercent}% tax${state.taxAmount ? ` (${state.taxAmount})` : ""}`,
+        );
+      }
+      const detail = extras.length ? ` (${extras.join("; ")})` : "";
+      const message = `Draft ${kind} for ${state.contactName}${detail} is ready. Reply 'approve' to authorise, or tell me what to change.`;
 
       const payload: InterruptPayload = {
         kind: "approval",
