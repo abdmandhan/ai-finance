@@ -2,11 +2,20 @@ export {
   scheduleSchemas,
   slotSchema,
   scheduleIntentSchema,
+  resolutionSchema,
   scheduleResultSchema,
   type Slot,
   type ScheduleIntent,
+  type Resolution,
   type ScheduleResult,
 } from "./schedule.schema";
+export {
+  preferenceSchemas,
+  preferenceExtractionSchema,
+  contactExtractionSchema,
+  type PreferenceExtraction,
+  type ContactExtraction,
+} from "./preference.schema";
 export {
   invoiceSchemas,
   invoiceLineSchema,

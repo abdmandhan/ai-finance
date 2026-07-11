@@ -22,6 +22,7 @@ import {
   createCalendarTool,
   createContactsTool,
   createMapsTool,
+  createPreferencesTool,
   createXeroTool,
 } from "@/tools";
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
@@ -108,6 +109,7 @@ async function main(): Promise<void> {
         workingHoursStart: config.calendar.working_hours_start,
         workingHoursEnd: config.calendar.working_hours_end,
       },
+      preferencesTool: createPreferencesTool(config.database.url, logger),
       logger,
       onProgress,
     },
@@ -409,6 +411,7 @@ async function main(): Promise<void> {
     await drive(workflow, chatId, {
       threadId: chatId,
       tenantId: msg.tenantId ?? "",
+      userId: msg.createdBy ?? "",
       userMessage: text,
       ...(attachments.length ? { attachments } : {}),
     });

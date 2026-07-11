@@ -24,6 +24,15 @@ export {
   type TravelTimeResult,
 } from "./maps.tool";
 export {
+  createPreferencesTool,
+  InMemoryPreferencesTool,
+  PostgresPreferencesTool,
+  type IPreferencesTool,
+  type PreferenceEntry,
+  type PreferenceKind,
+  type PrefKey,
+} from "./preferences.tool";
+export {
   createXeroTool,
   XeroTool,
   StubXeroTool,

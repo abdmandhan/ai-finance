@@ -1,12 +1,16 @@
 import {
   makeAskClarificationNode,
+  makeAwaitResolutionNode,
   makeCreateEventNode,
   makeFinalizeNode,
   makeFindSlotNode,
+  makeListPreferencesNode,
   makeLookupScheduleNode,
   makeNotifyNode,
   makeParseIntentNode,
   makeResolveContactNode,
+  makeSaveContactNode,
+  makeSavePreferenceNode,
   makeSearchCalendarNode,
   NODES,
   type ScheduleDeps,
@@ -37,7 +41,11 @@ export function buildScheduleGraph(
   const searchCalendar = makeSearchCalendarNode(deps);
   const lookupSchedule = makeLookupScheduleNode(deps);
   const findSlot = makeFindSlotNode(deps);
+  const awaitResolution = makeAwaitResolutionNode(deps);
   const createEvent = makeCreateEventNode(deps);
+  const saveContact = makeSaveContactNode(deps);
+  const savePreference = makeSavePreferenceNode(deps);
+  const listPreferences = makeListPreferencesNode(deps);
   const notify = makeNotifyNode(deps);
   const finalize = makeFinalizeNode(deps);
 
@@ -48,7 +56,11 @@ export function buildScheduleGraph(
     .addNode(searchCalendar.name, searchCalendar.node)
     .addNode(lookupSchedule.name, lookupSchedule.node)
     .addNode(findSlot.name, findSlot.node)
+    .addNode(awaitResolution.name, awaitResolution.node)
     .addNode(createEvent.name, createEvent.node)
+    .addNode(saveContact.name, saveContact.node)
+    .addNode(savePreference.name, savePreference.node)
+    .addNode(listPreferences.name, listPreferences.node)
     .addNode(notify.name, notify.node)
     .addNode(finalize.name, finalize.node)
     .addEdge(START, NODES.parseIntent)
@@ -59,6 +71,9 @@ export function buildScheduleGraph(
         NODES.askClarification,
         NODES.resolveContact,
         NODES.lookupSchedule,
+        NODES.saveContact,
+        NODES.savePreference,
+        NODES.listPreferences,
         NODES.finalize,
       ),
     )
@@ -67,6 +82,17 @@ export function buildScheduleGraph(
     // Lookup answers directly, then ends.
     .addEdge(NODES.lookupSchedule, NODES.finalize)
     .addConditionalEdges(
+      NODES.saveContact,
+      routeByNextNode,
+      pathMap(NODES.askClarification, NODES.finalize),
+    )
+    .addConditionalEdges(
+      NODES.savePreference,
+      routeByNextNode,
+      pathMap(NODES.askClarification, NODES.finalize),
+    )
+    .addEdge(NODES.listPreferences, NODES.finalize)
+    .addConditionalEdges(
       NODES.resolveContact,
       routeByNextNode,
       pathMap(NODES.askClarification, NODES.searchCalendar, NODES.finalize),
@@ -74,12 +100,29 @@ export function buildScheduleGraph(
     .addConditionalEdges(
       NODES.searchCalendar,
       routeByNextNode,
-      pathMap(NODES.findSlot, NODES.createEvent, NODES.finalize),
+      pathMap(
+        NODES.findSlot,
+        NODES.createEvent,
+        NODES.awaitResolution,
+        NODES.finalize,
+      ),
     )
     .addConditionalEdges(
       NODES.findSlot,
       routeByNextNode,
       pathMap(NODES.createEvent, NODES.finalize),
+    )
+    // The principal picks a resolution: book an option / accept / revalidate a
+    // change (back to search) / re-ask (self-loop, bounded) / end.
+    .addConditionalEdges(
+      NODES.awaitResolution,
+      routeByNextNode,
+      pathMap(
+        NODES.createEvent,
+        NODES.searchCalendar,
+        NODES.awaitResolution,
+        NODES.finalize,
+      ),
     )
     .addConditionalEdges(
       NODES.createEvent,

@@ -15,10 +15,19 @@ export type Slot = z.infer<typeof slotSchema>;
  */
 export const scheduleIntentSchema = z.object({
   intent: z
-    .enum(["schedule_meeting", "lookup_schedule", "unsupported"])
+    .enum([
+      "schedule_meeting",
+      "lookup_schedule",
+      "save_contact",
+      "set_preference",
+      "list_preferences",
+      "unsupported",
+    ])
     .describe(
       "schedule_meeting = book a meeting; lookup_schedule = a question about existing/upcoming " +
-        "meetings or availability; unsupported = neither",
+        "meetings or availability; save_contact = save/update a person's contact details; " +
+        "set_preference = a standing scheduling preference or correction to remember; " +
+        "list_preferences = asking what preferences are saved; unsupported = none of these",
     ),
   attendee: z.string().nullable().describe("Who to meet with, e.g. a name"),
   attendeeEmail: z
@@ -26,6 +35,19 @@ export const scheduleIntentSchema = z.object({
     .nullable()
     .describe(
       "The attendee's email address if explicitly stated in the message; never guess it",
+    ),
+  additionalAttendeeEmails: z
+    .array(z.string())
+    .nullable()
+    .describe(
+      "Extra attendee email addresses explicitly present in the message (beyond the primary attendee)",
+    ),
+  attendeeTimezone: z
+    .string()
+    .nullable()
+    .describe(
+      'IANA timezone of the OTHER party if stated or implied by their city (e.g. "she\'s in Sydney" ' +
+        '-> "Australia/Sydney"). Null when unknown.',
     ),
   durationMinutes: z
     .number()
@@ -56,6 +78,33 @@ export const scheduleIntentSchema = z.object({
     .describe(
       "Physical meeting address/venue if stated (used for travel time). Video links are NOT a location.",
     ),
+  meetingType: z
+    .enum(["video", "in_person"])
+    .nullable()
+    .describe(
+      'How the meeting happens: "video" for calls/Zoom/Meet, "in_person" when a physical venue is ' +
+        "stated or implied. Null when unclear.",
+    ),
+  videoLink: z
+    .string()
+    .nullable()
+    .describe(
+      "An explicit video-call URL present in the message (Zoom/Meet/Teams). Never fabricate one.",
+    ),
+  notes: z
+    .string()
+    .nullable()
+    .describe(
+      "Context worth carrying into the calendar event description (topic, agenda, background). " +
+        "Null when the message has none.",
+    ),
+  oneOffOverride: z
+    .boolean()
+    .nullable()
+    .describe(
+      'True ONLY when the user asks to bypass their standing preferences for this single request ' +
+        '(e.g. "just this once, 7pm is fine", "ignore lunch today only"). This never changes saved preferences.',
+    ),
   clarificationQuestion: z
     .string()
     .nullable()
@@ -81,6 +130,56 @@ export const scheduleIntentSchema = z.object({
 export type ScheduleIntent = z.infer<typeof scheduleIntentSchema>;
 
 /**
+ * The principal's reply to a conflict/violation proposal, parsed by the
+ * await-resolution node. Code executes the chosen action — never the LLM.
+ */
+export const resolutionSchema = z.object({
+  action: z
+    .enum([
+      "pick_option",
+      "accept_anyway",
+      "shorten",
+      "reschedule_existing",
+      "new_time",
+      "widen",
+      "cancel",
+      "unclear",
+    ])
+    .describe(
+      "pick_option = chose one of the numbered alternatives; accept_anyway = keep the originally " +
+        "requested time despite the warning; shorten = keep the time but reduce the duration; " +
+        "reschedule_existing = move one of the EXISTING conflicting events instead; new_time = " +
+        "proposed a different specific time; widen = search further out; cancel = drop the request; " +
+        "unclear = none of these can be determined",
+    ),
+  optionIndex: z
+    .number()
+    .int()
+    .positive()
+    .nullable()
+    .describe("1-based index of the chosen numbered option, for pick_option"),
+  newDurationMinutes: z
+    .number()
+    .int()
+    .positive()
+    .nullable()
+    .describe("New meeting length in minutes, for shorten"),
+  newStartIso: z
+    .string()
+    .nullable()
+    .describe(
+      "Concrete ISO 8601 start for new_time, resolved relative to the provided current date/time",
+    ),
+  targetEventSummary: z
+    .string()
+    .nullable()
+    .describe(
+      "Which existing event to move, for reschedule_existing — match against the listed conflicts",
+    ),
+});
+export type Resolution = z.infer<typeof resolutionSchema>;
+
+/**
  * Final result of the schedule workflow.
  */
 export const scheduleResultSchema = z.object({
@@ -97,5 +196,6 @@ export type ScheduleResult = z.infer<typeof scheduleResultSchema>;
 export const scheduleSchemas = {
   slotSchema,
   scheduleIntentSchema,
+  resolutionSchema,
   scheduleResultSchema,
 };

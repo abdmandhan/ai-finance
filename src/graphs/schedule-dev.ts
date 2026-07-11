@@ -12,6 +12,7 @@ import type { CalendarAuth } from "@/services/google-auth";
 import { StubCalendarTool } from "@/tools/calendar.tool";
 import { StubContactsTool } from "@/tools/contacts.tool";
 import { StubMapsTool } from "@/tools/maps.tool";
+import { InMemoryPreferencesTool } from "@/tools/preferences.tool";
 
 const config = configUtils.initConfig();
 const logger = loggerUtils.createLogger(config.log);
@@ -62,6 +63,7 @@ export const graph = buildScheduleGraph({
     workingHoursStart: config.calendar.working_hours_start,
     workingHoursEnd: config.calendar.working_hours_end,
   },
+  preferencesTool: new InMemoryPreferencesTool(),
   logger,
   onProgress: (chatId, event) => logger.info({ chatId, event }, "progress"),
 });

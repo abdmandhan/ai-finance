@@ -1,72 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
-import { pino } from "pino";
-import { Command, MemorySaver } from "@langchain/langgraph";
+import { describe, expect, it } from "vitest";
+import { Command } from "@langchain/langgraph";
 import type { ScheduleIntent } from "@/schemas";
-import type { CalendarAuth, ILlmService } from "@/services";
-import {
-  StubCalendarTool,
-  StubContactsTool,
-  StubMapsTool,
-  type CalendarEvent,
-  type Contact,
-} from "@/tools";
-import type { ScheduleDeps } from "@/nodes";
-import { buildScheduleGraph } from "./schedule.graph";
-
-function intent(over: Partial<ScheduleIntent> = {}): ScheduleIntent {
-  return {
-    intent: "schedule_meeting",
-    attendee: "Sarah",
-    attendeeEmail: null,
-    durationMinutes: 30,
-    timezone: null,
-    timeframe: "next week",
-    requestedStartIso: null,
-    location: null,
-    clarificationQuestion: null,
-    rangeStartIso: null,
-    rangeEndIso: null,
-    ...over,
-  };
-}
-
-const fakeAuth: CalendarAuth = {
-  accessToken: "x",
-  provider: "google",
-  calendarId: "primary",
-  emailAddress: "me@example.com",
-  expiresAtMs: Number.MAX_SAFE_INTEGER,
-};
-
-function buildGraph(
-  opts: {
-    intents?: ScheduleIntent[];
-    contacts?: Contact[];
-    events?: CalendarEvent[];
-    travelMinutes?: number;
-  } = {},
-) {
-  const logger = pino({ level: "silent" });
-  const extract = vi.fn();
-  for (const i of opts.intents ?? [intent()]) extract.mockResolvedValueOnce(i);
-  const llmService: ILlmService = { extract };
-  const contactsTool = new StubContactsTool(opts.contacts ?? []);
-  const deps: ScheduleDeps = {
-    llmService,
-    calendarTool: new StubCalendarTool(logger, opts.events ?? []),
-    contactsTool,
-    mapsTool: new StubMapsTool(opts.travelMinutes ?? 10),
-    resolveAuth: async () => fakeAuth,
-    defaultTimezone: "UTC",
-    schedulingPrefs: {
-      bufferMinutes: 15,
-      workingHoursStart: 9,
-      workingHoursEnd: 18,
-    },
-    logger,
-  };
-  return { graph: buildScheduleGraph(deps, new MemorySaver()), contactsTool };
-}
+import { buildGraph, fakeAuth, intent } from "./schedule.test-utils";
 
 describe("schedule graph (no approval, contacts-aware)", () => {
   it("creates immediately when the contact is known — no pause", async () => {
@@ -221,13 +156,21 @@ describe("schedule graph honors the requested date/time", () => {
 describe("schedule graph — conflicts and travel time", () => {
   const knownSarah = [{ name: "Sarah", email: "sarah@example.com" }];
 
-  it("proposes alternatives (does not book) when the requested time overlaps an event", async () => {
-    const { graph } = buildGraph({
+  it("pauses with a proposal (does not book) when the requested time overlaps an event, then books the picked option", async () => {
+    const { graph, calendarTool } = buildGraph({
       intents: [
         intent({
           requestedStartIso: "2026-07-13T10:30:00.000Z",
           timeframe: null,
         }),
+        // Second extract: the resolution of the principal's reply.
+        {
+          action: "pick_option",
+          optionIndex: 1,
+          newDurationMinutes: null,
+          newStartIso: null,
+          targetEventSummary: null,
+        },
       ],
       contacts: knownSarah,
       events: [
@@ -241,7 +184,7 @@ describe("schedule graph — conflicts and travel time", () => {
     });
     const config = { configurable: { thread_id: "t-overlap" } };
 
-    const result: any = await graph.invoke(
+    const paused: any = await graph.invoke(
       {
         threadId: "t-overlap",
         tenantId: "tenant-1",
@@ -249,13 +192,25 @@ describe("schedule graph — conflicts and travel time", () => {
       },
       config,
     );
-    expect(result.result.status).toBe("proposed");
-    expect(result.result.suggestedSlots.length).toBeGreaterThan(0);
-    expect(result.result.eventId).toBeUndefined();
+    // Held open as a proposal: both events summarized, nothing booked yet.
+    const interruptValue = paused.__interrupt__?.[0]?.value;
+    expect(interruptValue?.kind).toBe("proposal");
+    expect(interruptValue?.message).toContain("Standup");
+    expect(interruptValue?.message).toContain("Meeting with Sarah");
+    expect(calendarTool.created).toHaveLength(0);
+
+    const resumed: any = await graph.invoke(
+      new Command({ resume: { reply: "option 1" } }),
+      config,
+    );
+    expect(resumed.result.status).toBe("created");
+    expect(calendarTool.created).toHaveLength(1);
+    // Booked the first offered alternative, not the conflicting time.
+    expect(resumed.selectedSlot.start).not.toBe("2026-07-13T10:30:00.000Z");
   });
 
-  it("proposes alternatives when there is not enough travel time from the prior meeting", async () => {
-    const { graph } = buildGraph({
+  it("pauses with a travel proposal when there is not enough travel time from the prior meeting", async () => {
+    const { graph, calendarTool } = buildGraph({
       // Requested 10:00 at a far location; prior in-person event ends 09:45 (15 min gap).
       intents: [
         intent({
@@ -278,7 +233,7 @@ describe("schedule graph — conflicts and travel time", () => {
     });
     const config = { configurable: { thread_id: "t-travel" } };
 
-    const result: any = await graph.invoke(
+    const paused: any = await graph.invoke(
       {
         threadId: "t-travel",
         tenantId: "tenant-1",
@@ -286,8 +241,82 @@ describe("schedule graph — conflicts and travel time", () => {
       },
       config,
     );
-    expect(result.result.status).toBe("proposed");
-    expect(result.result.summary.toLowerCase()).toContain("travel");
+    const interruptValue = paused.__interrupt__?.[0]?.value;
+    expect(interruptValue?.kind).toBe("proposal");
+    expect(interruptValue?.message.toLowerCase()).toContain("travel");
+    expect(calendarTool.created).toHaveLength(0);
+  });
+
+  it("raises no travel conflict for back-to-back video calls (virtual is exempt)", async () => {
+    const { graph, calendarTool } = buildGraph({
+      // Video call right after another video call — no locations anywhere.
+      intents: [
+        intent({
+          requestedStartIso: "2026-07-13T10:00:00.000Z",
+          timeframe: null,
+          meetingType: "video",
+        }),
+      ],
+      contacts: knownSarah,
+      events: [
+        {
+          eventId: "e1",
+          summary: "Zoom sync",
+          start: "2026-07-13T09:30:00.000Z",
+          end: "2026-07-13T09:45:00.000Z",
+          location: "https://zoom.us/j/123",
+        },
+      ],
+      travelMinutes: 120, // would block if travel were (wrongly) applied
+    });
+    const config = { configurable: { thread_id: "t-virtual" } };
+
+    const result: any = await graph.invoke(
+      {
+        threadId: "t-virtual",
+        tenantId: "tenant-1",
+        userMessage: "video call with Sarah Monday 10",
+      },
+      config,
+    );
+    expect(result.result.status).toBe("created");
+    expect(calendarTool.created).toHaveLength(1);
+  });
+
+  it("ignores a prior virtual meeting when computing travel to an onsite one (mixed)", async () => {
+    const { graph } = buildGraph({
+      // Onsite at 10:00; the only prior event is a video call — no travel leg exists.
+      intents: [
+        intent({
+          requestedStartIso: "2026-07-13T10:00:00.000Z",
+          timeframe: null,
+          location: "Acme HQ, Jakarta",
+        }),
+      ],
+      contacts: knownSarah,
+      events: [
+        {
+          eventId: "e1",
+          summary: "Video standup",
+          start: "2026-07-13T09:00:00.000Z",
+          end: "2026-07-13T09:40:00.000Z",
+          location: "https://meet.google.com/xyz",
+        },
+      ],
+      travelMinutes: 120, // must not be applied to the virtual leg
+    });
+    const config = { configurable: { thread_id: "t-mixed" } };
+
+    const result: any = await graph.invoke(
+      {
+        threadId: "t-mixed",
+        tenantId: "tenant-1",
+        userMessage: "meet Sarah Monday 10 at Acme HQ",
+      },
+      config,
+    );
+    // 20-min gap ≥ 15-min buffer, and no travel demanded from a video call.
+    expect(result.result.status).toBe("created");
   });
 
   it("books when there is enough travel time and no conflict", async () => {

@@ -3,7 +3,10 @@ export {
   INVOICE_NODES,
   DEFAULT_DURATION_MINUTES,
   MAX_CLARIFY_ATTEMPTS,
+  DEFAULT_POST_ARRIVAL_BUFFER_MINUTES,
   emitProgress,
+  mergePrefs,
+  postArrivalBufferMinutes,
   type ScheduleDeps,
   type InvoiceDeps,
   type InterruptPayload,
@@ -16,6 +19,12 @@ export { makeSearchCalendarNode } from "./search-calendar";
 export { makeLookupScheduleNode } from "./lookup-schedule";
 export { makeFindSlotNode } from "./find-slot";
 export { makeCreateEventNode } from "./create-event";
+export { makeAwaitResolutionNode } from "./await-resolution";
+export { makeSaveContactNode } from "./save-contact";
+export {
+  makeSavePreferenceNode,
+  makeListPreferencesNode,
+} from "./manage-preference";
 export { makeNotifyNode } from "./notify";
 export { makeFinalizeNode } from "./finalize";
 // Invoice (Xero) nodes

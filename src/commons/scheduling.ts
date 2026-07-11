@@ -13,11 +13,40 @@ export interface BusyEvent {
   travelTimeAfterMs?: number;
 }
 
+/** Recurring daily block (lunch, deep work) in minutes since local midnight. */
+export interface TimeWindow {
+  startMinutes: number;
+  endMinutes: number;
+}
+
+export interface FocusBlock extends TimeWindow {
+  /** Weekdays (0=Sun..6=Sat) the block applies to; absent = every day. */
+  days?: number[];
+  label?: string;
+}
+
 export interface SchedulingPrefs {
   bufferMinutes: number;
   workingHoursStart: number; // local hour, e.g. 9
   workingHoursEnd: number; // local hour, e.g. 18
   timezone: string; // IANA, used to read the local hour of a candidate
+  /** Weekdays meetings are allowed (0=Sun..6=Sat); absent = all days. */
+  workingDays?: number[];
+  /** Weekdays explicitly kept meeting-free (e.g. "no meetings Fridays"). */
+  noMeetingDays?: number[];
+  lunch?: TimeWindow;
+  focusBlocks?: FocusBlock[];
+}
+
+/** Why a candidate slot is unacceptable under the principal's preferences. */
+export interface SlotViolation {
+  kind:
+    | "working_hours"
+    | "non_working_day"
+    | "no_meeting_day"
+    | "lunch"
+    | "focus_block";
+  message: string;
 }
 
 /** A physical address (usable as a Maps origin/destination) vs a video link or empty. */
@@ -44,31 +73,116 @@ export function detectConflicts<T extends { start: string; end: string }>(
   });
 }
 
-/** Local hour-of-day (0-23) for an instant in the given IANA timezone. */
-function localHour(ms: number, timezone: string): number {
+/** Minutes since local midnight (0-1439) for an instant in the given IANA timezone. */
+function localMinutes(ms: number, timezone: string): number {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
     hour: "numeric",
+    minute: "numeric",
     hour12: false,
   }).formatToParts(new Date(ms));
   const h = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
-  return h === 24 ? 0 : h;
+  const m = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  return (h === 24 ? 0 : h) * 60 + m;
 }
 
-/** Slot fully inside working hours (start hour >= open, end hour <= close, same-day). */
+/** Local weekday (0=Sun..6=Sat) for an instant in the given IANA timezone. */
+function localWeekday(ms: number, timezone: string): number {
+  const day = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    weekday: "short",
+  }).format(new Date(ms));
+  return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(day);
+}
+
+const WEEKDAY_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+/** "12:30" from minutes-since-midnight. */
+function minutesToHhmm(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/** Two [start, end) minute ranges on the same local day overlap. */
+function minutesOverlap(
+  aStart: number,
+  aEnd: number,
+  b: TimeWindow,
+): boolean {
+  return aStart < b.endMinutes && aEnd > b.startMinutes;
+}
+
+/**
+ * First preference the slot violates, or null if acceptable. Checks day-of-week,
+ * working hours (minute precision), lunch, then focus blocks — all in prefs.timezone.
+ */
+export function slotViolation(
+  startMs: number,
+  endMs: number,
+  prefs: SchedulingPrefs,
+): SlotViolation | null {
+  if (endMs - startMs > 24 * 60 * 60_000) {
+    return { kind: "working_hours", message: "That spans more than a day." };
+  }
+  const tz = prefs.timezone;
+  const weekday = localWeekday(startMs, tz);
+  if (prefs.noMeetingDays?.includes(weekday)) {
+    return {
+      kind: "no_meeting_day",
+      message: `${WEEKDAY_NAMES[weekday]}s are kept meeting-free.`,
+    };
+  }
+  if (prefs.workingDays && !prefs.workingDays.includes(weekday)) {
+    return {
+      kind: "non_working_day",
+      message: `${WEEKDAY_NAMES[weekday]} is outside your working days.`,
+    };
+  }
+  const startMin = localMinutes(startMs, tz);
+  // Duration-derived end keeps the range on one local day (a midnight end reads as 24:00).
+  const endMin = startMin + Math.round((endMs - startMs) / 60_000);
+  const openMin = prefs.workingHoursStart * 60;
+  const closeMin = prefs.workingHoursEnd * 60;
+  if (startMin < openMin || endMin > closeMin) {
+    return {
+      kind: "working_hours",
+      message: `That falls outside your working hours (${minutesToHhmm(openMin)}–${minutesToHhmm(closeMin)}).`,
+    };
+  }
+  if (prefs.lunch && minutesOverlap(startMin, endMin, prefs.lunch)) {
+    return {
+      kind: "lunch",
+      message: `That overlaps your lunch break (${minutesToHhmm(prefs.lunch.startMinutes)}–${minutesToHhmm(prefs.lunch.endMinutes)}).`,
+    };
+  }
+  for (const block of prefs.focusBlocks ?? []) {
+    const applies = !block.days || block.days.includes(weekday);
+    if (applies && minutesOverlap(startMin, endMin, block)) {
+      return {
+        kind: "focus_block",
+        message: `That overlaps your ${block.label ?? "focus"} block (${minutesToHhmm(block.startMinutes)}–${minutesToHhmm(block.endMinutes)}).`,
+      };
+    }
+  }
+  return null;
+}
+
+/** Slot acceptable under all preference constraints (hours, days, lunch, focus). */
 function inWorkingHours(
   startMs: number,
   endMs: number,
   prefs: SchedulingPrefs,
 ): boolean {
-  const startHour = localHour(startMs, prefs.timezone);
-  // Use the end minus 1ms so an event ending exactly at close counts as inside.
-  const endHour = localHour(endMs - 1, prefs.timezone);
-  return (
-    startHour >= prefs.workingHoursStart &&
-    endHour < prefs.workingHoursEnd &&
-    endMs - startMs <= 24 * 60 * 60_000
-  );
+  return slotViolation(startMs, endMs, prefs) === null;
 }
 
 /**
@@ -152,6 +266,52 @@ function formatTime(ms: number, timezone: string): string {
     minute: "2-digit",
     hour12: false,
   }).format(new Date(ms));
+}
+
+/** "Mon, Jul 13 10:00–10:30" in the given timezone. */
+function formatRange(startMs: number, endMs: number, timezone: string): string {
+  return `${formatDay(startMs, timezone)} ${formatTime(startMs, timezone)}–${formatTime(endMs, timezone)}`;
+}
+
+/**
+ * Render a slot in the principal's timezone, and — when the other party sits in a
+ * different zone — also in theirs: "Mon, Jul 13 10:00–10:30 (Asia/Singapore) /
+ * Mon, Jul 13 13:00–13:30 (Australia/Sydney)".
+ */
+export function formatSlotDual(
+  slot: { start: string; end: string },
+  principalTz: string,
+  attendeeTz?: string | null,
+): string {
+  const startMs = Date.parse(slot.start);
+  const endMs = Date.parse(slot.end);
+  const principal = formatRange(startMs, endMs, principalTz);
+  if (!attendeeTz || attendeeTz === principalTz) return principal;
+  const attendee = formatRange(startMs, endMs, attendeeTz);
+  return `${principal} (${principalTz}) / ${attendee} (${attendeeTz})`;
+}
+
+/** One-line event summary for conflict messages: when — what (@ where). */
+export function formatEventLine(e: ScheduleEntry, timezone: string): string {
+  const when = formatRange(Date.parse(e.start), Date.parse(e.end), timezone);
+  const where = isPhysical(e.location) ? ` (@ ${e.location})` : "";
+  return `${when} — ${e.summary}${where}`;
+}
+
+const FLIGHT_RE =
+  /(\bflight\b|\bfly(?:ing)?\b|✈|\barriv(?:al|es|ing)?\b|\bland(?:s|ing)?\b|\bairport\b|\bterminal\b|\b[A-Z]{2}\s?\d{2,4}\b)/;
+
+/**
+ * Heuristic: does this event look like a flight / arrival leg? Matches airline-code
+ * patterns ("SQ123") case-sensitively and travel keywords case-insensitively on the
+ * summary or location. Used to add a post-arrival buffer before the next onsite meeting.
+ */
+export function isFlightLike(e: {
+  summary: string;
+  location?: string;
+}): boolean {
+  const text = `${e.summary} ${e.location ?? ""}`;
+  return FLIGHT_RE.test(text) || FLIGHT_RE.test(text.toLowerCase());
 }
 
 /**

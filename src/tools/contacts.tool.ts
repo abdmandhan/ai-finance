@@ -342,15 +342,30 @@ export class StubContactsTool implements IContactsTool {
     return this.contacts.filter((c) => c.name.toLowerCase().includes(q));
   }
 
+  // Mirrors DriveContactsTool.save exactly so graph tests exercise the real
+  // dedup semantics: email match → update; unique name match → update;
+  // multiple name matches → disambiguate; else append.
   async save(
     _auth: CalendarAuth,
     contact: Contact,
   ): Promise<SaveContactResult> {
-    const idx = this.contacts.findIndex(
+    const emailIdx = this.contacts.findIndex(
       (c) => c.email.toLowerCase() === contact.email.toLowerCase(),
     );
-    if (idx >= 0) {
-      this.contacts[idx] = mergeContact(this.contacts[idx], contact);
+    if (emailIdx >= 0) {
+      this.contacts[emailIdx] = mergeContact(this.contacts[emailIdx], contact);
+      return { action: "updated" };
+    }
+    const nameMatches = this.contacts.filter(
+      (c) => c.name.toLowerCase() === contact.name.toLowerCase(),
+    );
+    if (nameMatches.length > 1)
+      return { action: "needs_disambiguation", matches: nameMatches };
+    if (nameMatches.length === 1) {
+      const nameIdx = this.contacts.findIndex(
+        (c) => c.name.toLowerCase() === contact.name.toLowerCase(),
+      );
+      this.contacts[nameIdx] = mergeContact(this.contacts[nameIdx], contact);
       return { action: "updated" };
     }
     this.contacts.push(contact);
