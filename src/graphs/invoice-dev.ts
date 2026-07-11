@@ -20,7 +20,7 @@ const fakeAuth: XeroAuth = {
 };
 
 export const graph = buildInvoiceGraph({
-  llmService: createLlmService(config.llm),
+  llmService: createLlmService(config.llm, logger),
   xeroTool: new StubXeroTool([{ ContactID: "c-acme", Name: "Acme" }]),
   resolveXeroAuth: async () => fakeAuth,
   orgDefaults: {

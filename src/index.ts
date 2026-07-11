@@ -7,22 +7,27 @@ import {
 import {
   createAssistantHandler,
   createCorrelationStore,
+  createErrorPublishingHandler,
   createLegacyHandler,
 } from "@/handlers";
-import { checkpointerUtils } from "@/memory";
+import { checkpointerUtils, FallbackCheckpointer } from "@/memory";
 import {
   createAuditService,
+  createCacheService,
   createFetchAttachment,
   createKafkaService,
   createLlmService,
   createPausedWorkflowCheck,
+  createQueueService,
   createResolveAuth,
   createResolveEnablement,
   createResolveXeroAuth,
   createWorkflowRunner,
+  type ICacheService,
   type RunnableGraph,
   type Workflow,
 } from "@/services";
+import { createInboundFanout, createInboundWorker } from "@/workers";
 import {
   createCalendarTool,
   createContactsTool,
@@ -36,13 +41,13 @@ async function main(): Promise<void> {
 
   const kafka = createKafkaService(config, logger);
   const audit = createAuditService(logger);
-  const llmService = createLlmService(config.llm);
+  const llmService = createLlmService(config.llm, logger);
   const resolveEnablement = createResolveEnablement(
     config.agents.enablement_endpoint_base_url,
     logger,
   );
-  const checkpointer = checkpointerUtils.createCheckpointer(
-    config.database.url,
+  const checkpointer = await checkpointerUtils.createCheckpointer(
+    config,
     logger,
   );
 
@@ -140,16 +145,62 @@ async function main(): Promise<void> {
         correlations,
       });
 
-  await kafka.consume(config.kafka.topics.inbound, handler);
+  // Queue-backed path: Kafka -> dedup -> Redis groupmq -> N workers -> handler.
+  // Direct path (worker.enabled=false): Kafka -> retry+dead-letter wrapper -> handler.
+  let cache: ICacheService | null = null;
+  let fanout: ReturnType<typeof createInboundFanout> | null = null;
+  let worker: ReturnType<typeof createInboundWorker> | null = null;
+
+  if (config.worker.enabled) {
+    if (!config.redis.url) {
+      throw new Error(
+        "worker.enabled requires redis.url (groupmq queue lives in Redis)",
+      );
+    }
+    cache = createCacheService(config, logger);
+    const queueService = createQueueService(config, cache, logger);
+    worker = createInboundWorker({
+      queueService,
+      kafka,
+      logger,
+      config,
+      handle: handler,
+    });
+    fanout = createInboundFanout({ queueService, cache, logger, config });
+    await worker.start();
+    await kafka.consume(
+      config.kafka.topics.inbound,
+      createErrorPublishingHandler({
+        inner: fanout.handler,
+        kafka,
+        logger,
+        // Enqueue is cheap and idempotent (dedup key) — one retry is enough.
+        attempts: 2,
+      }),
+    );
+  } else {
+    await kafka.consume(
+      config.kafka.topics.inbound,
+      createErrorPublishingHandler({ inner: handler, kafka, logger }),
+    );
+  }
 
   logger.info(
-    { assistant: config.assistant.enabled },
+    { assistant: config.assistant.enabled, worker: config.worker.enabled },
     "Tigeri graph service running",
   );
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "shutting down");
+    // Order matters: stop intake, drain in-flight jobs, then flush checkpoints
+    // written by those jobs, then drop the Redis connection.
+    fanout?.stop();
     await kafka.disconnect();
+    await worker?.stop();
+    if (checkpointer instanceof FallbackCheckpointer) {
+      await checkpointer.flushToPostgres();
+    }
+    await cache?.disconnect();
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown("SIGINT"));

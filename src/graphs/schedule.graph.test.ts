@@ -49,7 +49,7 @@ function buildGraph(
   const logger = pino({ level: "silent" });
   const extract = vi.fn();
   for (const i of opts.intents ?? [intent()]) extract.mockResolvedValueOnce(i);
-  const llmService: ILlmService = { extract, chat: vi.fn() };
+  const llmService: ILlmService = { invoke: vi.fn(), extract, chat: vi.fn() };
   const contactsTool = new StubContactsTool(opts.contacts ?? []);
   const deps: ScheduleDeps = {
     llmService,

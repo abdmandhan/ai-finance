@@ -22,6 +22,7 @@ function buildDeps(over: Partial<ScheduleIntent>): ScheduleDeps {
   };
   return {
     llmService: {
+      invoke: vi.fn(),
       extract: vi.fn().mockResolvedValue(intent),
       chat: vi.fn(),
     } as ILlmService,

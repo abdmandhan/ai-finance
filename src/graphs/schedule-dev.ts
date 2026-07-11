@@ -25,7 +25,7 @@ const fakeAuth: CalendarAuth = {
 };
 
 export const graph = buildScheduleGraph({
-  llmService: createLlmService(config.llm),
+  llmService: createLlmService(config.llm, logger),
   // Seed busy events so you can demo a conflict / travel proposal AND a schedule
   // lookup ("what is my schedule for tomorrow?") in Studio.
   calendarTool: new StubCalendarTool(logger, [

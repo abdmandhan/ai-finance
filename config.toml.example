@@ -3,14 +3,42 @@ format = "pretty" # "json" or "pretty"
 level = "info"
 
 [llm]
-# Chat model used by the planner / entity-extraction nodes.
-# provider: "anthropic" or "openai". api_key + model must match the provider.
-provider = "openai"
-api_key = ""          # OpenAI key (sk-...) when provider = "openai"; Anthropic key otherwise
-model = "gpt-4o-mini"
-# Anthropic example:
-# provider = "anthropic"
-# model = "claude-sonnet-4-5-20250929"
+# Chat models used by the planner / entity-extraction nodes, in three size tiers.
+# Shared defaults here; each tier may override url/api_key. model is
+# "provider:model" (initChatModel format), e.g. "anthropic:claude-sonnet-4-5-20250929"
+# or "openai:gpt-4o-mini".
+url = ""              # optional OpenAI-compatible base URL; leave empty for hosted providers (Anthropic rejects it)
+api_key = ""          # key matching the tier's provider
+
+[llm.small]           # cheap/fast: classification, simple extraction
+model = "anthropic:claude-haiku-4-5"
+
+[llm.medium]          # default for structured extraction
+model = "anthropic:claude-sonnet-4-5-20250929"
+
+[llm.large]           # planner / conversational turns
+model = "anthropic:claude-sonnet-4-5-20250929"
+
+[redis]
+# Redis powers the hot checkpointer tier and the queue pipeline.
+# Empty url -> both off: checkpointer falls back to Postgres/MemorySaver,
+# queue-backed consumption unavailable (worker.enabled must stay false).
+url = ""              # e.g. "redis://localhost:6379"
+password = ""
+
+[worker]
+# Queue-backed consumption: Kafka -> dedup -> Redis groupmq queue -> N workers.
+# Requires redis.url. false -> direct Kafka -> handler (current simple path).
+enabled = false
+keep_completed = 100  # finished jobs retained in Redis
+keep_failed = 300
+concurrency = 10      # parallel jobs across chat groups (per-chat stays FIFO)
+# Pause Kafka intake while waiting+active+delayed >= this. Keep small: the wait
+# blocks the consumer poll loop, which must stay under librdkafka
+# max.poll.interval.ms (5 min) or the consumer is kicked from the group.
+max_backlog = 10
+max_attempts = 3      # job retries before dead-lettering to kafka.topics.inbound_error
+job_timeout_ms = 300000
 
 [assistant]
 # Hybrid assistant: a conversational main agent (thread assistant:<chatId>) answers general
@@ -69,3 +97,4 @@ sasl_protocol = "SASL_SSL"
 inbound = "chat.inbound"    # consume: user messages (new goals AND resume replies)
 outbound = "chat.outbound"  # produce: AI replies, clarifications, approval requests (output.approvalData)
 events = "chat.events"      # produce: ephemeral progress { stage, msg, timestamp }
+inbound_error = "chat.inbound.error"  # produce: { error, data } dead-letter for failed inbound handling

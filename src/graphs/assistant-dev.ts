@@ -31,7 +31,7 @@ const stubRunWorkflow: RunWorkflow = async (workflow, chatId, input) => {
 };
 
 export const graph = buildAssistantGraph({
-  llmService: createLlmService(config.llm),
+  llmService: createLlmService(config.llm, logger),
   runWorkflow: stubRunWorkflow,
   audit: createAuditService(logger),
   defaultTimezone: config.calendar.default_timezone,

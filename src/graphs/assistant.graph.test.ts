@@ -25,7 +25,7 @@ function buildGraph(
   for (const r of opts.replies ?? [new AIMessage("Hello!")]) {
     chat.mockResolvedValueOnce(r);
   }
-  const llmService: ILlmService = { extract: vi.fn(), chat };
+  const llmService: ILlmService = { invoke: vi.fn(), extract: vi.fn(), chat };
   const runWorkflow = vi.fn();
   for (const o of opts.outcomes ?? []) runWorkflow.mockResolvedValueOnce(o);
   const deps: AssistantDeps = {
@@ -101,7 +101,9 @@ describe("assistant graph", () => {
 
     const result: any = await graph.invoke(
       baseInput({
-        messages: [{ role: "user", content: "Schedule with Sarah tomorrow 10am" }],
+        messages: [
+          { role: "user", content: "Schedule with Sarah tomorrow 10am" },
+        ],
       }),
       config("t-schedule"),
     );
@@ -133,7 +135,9 @@ describe("assistant graph", () => {
     });
 
     const result: any = await graph.invoke(
-      baseInput({ messages: [{ role: "user", content: "Schedule with Sarah" }] }),
+      baseInput({
+        messages: [{ role: "user", content: "Schedule with Sarah" }],
+      }),
       config("t-clarify"),
     );
 
@@ -165,7 +169,9 @@ describe("assistant graph", () => {
     });
 
     const result: any = await graph.invoke(
-      baseInput({ messages: [{ role: "user", content: "Invoice Acme $2,500" }] }),
+      baseInput({
+        messages: [{ role: "user", content: "Invoice Acme $2,500" }],
+      }),
       config("t-approval"),
     );
 
@@ -190,19 +196,27 @@ describe("assistant graph", () => {
     );
 
     expect(runWorkflow).not.toHaveBeenCalled();
-    expect(result.outcome).toEqual({ kind: "agent_disabled", workflow: "invoice" });
+    expect(result.outcome).toEqual({
+      kind: "agent_disabled",
+      workflow: "invoice",
+    });
     const toolMsg = result.messages.find((m: any) => m instanceof ToolMessage);
     expect(JSON.parse(toolMsg.content).status).toBe("agent_disabled");
   });
 
   it("keeps conversation memory across turns on one thread", async () => {
     const { graph, chat } = buildGraph({
-      replies: [new AIMessage("It records income when earned."), new AIMessage("Yes.")],
+      replies: [
+        new AIMessage("It records income when earned."),
+        new AIMessage("Yes."),
+      ],
     });
     const cfg = config("t-memory");
 
     await graph.invoke(
-      baseInput({ messages: [{ role: "user", content: "What is accrual accounting?" }] }),
+      baseInput({
+        messages: [{ role: "user", content: "What is accrual accounting?" }],
+      }),
       cfg,
     );
     await graph.invoke(
@@ -213,16 +227,102 @@ describe("assistant graph", () => {
     // Second call sees turn 1 (human + ai) plus turn 2's human message, after the system prompt.
     const secondCallMessages = chat.mock.calls[1][0];
     const texts = secondCallMessages.map((m: any) => String(m.content));
-    expect(texts.some((t: string) => t.includes("What is accrual accounting?"))).toBe(true);
-    expect(texts.some((t: string) => t.includes("It records income when earned."))).toBe(true);
+    expect(
+      texts.some((t: string) => t.includes("What is accrual accounting?")),
+    ).toBe(true);
+    expect(
+      texts.some((t: string) => t.includes("It records income when earned.")),
+    ).toBe(true);
     expect(texts.at(-1)).toContain("Is it required?");
+  });
+
+  it("ends a runaway model↔tools loop at the step cap instead of spinning forever", async () => {
+    const logger = pino({ level: "silent" });
+    // Model that ALWAYS asks for another tool call; workflow always returns a result.
+    const chat = vi.fn(async () =>
+      toolCallMessage("schedule_meeting", "again"),
+    );
+    const runWorkflow = vi.fn(async () => ({
+      kind: "result" as const,
+      workflow: "schedule" as const,
+      result: { status: "created", summary: "ok" },
+    }));
+    const deps: AssistantDeps = {
+      llmService: { invoke: vi.fn(), extract: vi.fn(), chat },
+      runWorkflow,
+      audit: { runStarted: vi.fn(), toolCalled: vi.fn(), runFinished: vi.fn() },
+      defaultTimezone: "UTC",
+      maxHistoryMessages: 30,
+      logger,
+    };
+    const graph = buildAssistantGraph(deps, new MemorySaver());
+
+    const result: any = await graph.invoke(
+      baseInput({ messages: [{ role: "user", content: "loop me" }] }),
+      { ...config("t-max-steps"), recursionLimit: 100 },
+    );
+
+    expect(String(result.messages.at(-1).content)).toContain(
+      "Maximum processing steps reached",
+    );
+    // The cap (25 model steps) bounds the loop well under the recursion limit.
+    expect(chat.mock.calls.length).toBeLessThanOrEqual(25);
+  });
+
+  it("turns a crashed workflow into an error tool result instead of killing the run", async () => {
+    const { graph, runWorkflow } = buildGraph({
+      replies: [
+        toolCallMessage("schedule_meeting", "Meet Sarah"),
+        new AIMessage("Sorry, scheduling failed — try again shortly."),
+      ],
+    });
+    runWorkflow.mockRejectedValue(new Error("calendar API down"));
+
+    const result: any = await graph.invoke(
+      baseInput({
+        messages: [{ role: "user", content: "Schedule with Sarah" }],
+      }),
+      config("t-wf-error"),
+    );
+
+    const toolMsg = result.messages.find((m: any) => m instanceof ToolMessage);
+    expect(JSON.parse(toolMsg.content)).toEqual({
+      status: "error",
+      message: "calendar API down",
+    });
+    expect(String(result.messages.at(-1).content)).toContain("failed");
+  });
+
+  it("caps checkpointed conversation memory at 25 messages", async () => {
+    const replies = Array.from(
+      { length: 20 },
+      (_, i) => new AIMessage(`r${i}`),
+    );
+    const { graph } = buildGraph({ replies });
+    const cfg = config("t-msg-cap");
+
+    for (let i = 0; i < 20; i++) {
+      await graph.invoke(
+        baseInput({ messages: [{ role: "user", content: `turn ${i}` }] }),
+        cfg,
+      );
+    }
+
+    const state: any = await (graph as any).getState(cfg);
+    expect(state.values.messages.length).toBeLessThanOrEqual(25);
+    // newest survive the window
+    expect(String(state.values.messages.at(-1).content)).toBe("r19");
   });
 
   it("injects the workflow report on a resume turn and withholds tools", async () => {
     const report: AssistantWorkflowOutcome = {
       kind: "result",
       workflow: "invoice",
-      result: { status: "created", summary: "Invoice INV-1 authorised.", invoiceId: "inv-1" },
+      result: {
+        status: "created",
+        summary: "Invoice INV-1 authorised.",
+        invoiceId: "inv-1",
+      },
     };
     const { graph, chat } = buildGraph({
       replies: [new AIMessage("Your invoice INV-1 is authorised.")],
@@ -239,7 +339,9 @@ describe("assistant graph", () => {
     const systemTexts = chat.mock.calls[0][0]
       .filter((m: any) => m.getType?.() === "system")
       .map((m: any) => String(m.content));
-    expect(systemTexts.some((t: string) => t.includes("Invoice INV-1 authorised."))).toBe(true);
+    expect(
+      systemTexts.some((t: string) => t.includes("Invoice INV-1 authorised.")),
+    ).toBe(true);
     expect(chat.mock.calls[0][1]).toBeUndefined(); // no tools in report mode
     expect(result.messages.at(-1).content).toContain("authorised");
   });

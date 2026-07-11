@@ -1,3 +1,4 @@
+import { withRetry } from "@/commons";
 import type { AssistantStateType } from "@/graphs/assistant.state";
 import type { AssistantWorkflowOutcome } from "@/schemas";
 // Concrete module (not the `@/services` barrel) so Studio dev harnesses that load
@@ -103,7 +104,10 @@ export function makeAssistantExecuteToolsNode(deps: AssistantDeps) {
         if (!workflow) {
           messages.push(
             new ToolMessage(
-              JSON.stringify({ status: "error", message: `Unknown tool: ${call.name}` }),
+              JSON.stringify({
+                status: "error",
+                message: `Unknown tool: ${call.name}`,
+              }),
               callId,
             ),
           );
@@ -130,7 +134,10 @@ export function makeAssistantExecuteToolsNode(deps: AssistantDeps) {
           messages.push(
             new ToolMessage(JSON.stringify(toolResultFor(disabled)), callId),
           );
-          deps.logger.info({ chatId: state.chatId, workflow }, "agent disabled — gated");
+          deps.logger.info(
+            { chatId: state.chatId, workflow },
+            "agent disabled — gated",
+          );
           continue;
         }
 
@@ -140,24 +147,53 @@ export function makeAssistantExecuteToolsNode(deps: AssistantDeps) {
           workflow,
           userId: state.userId || undefined,
         });
-        const request = String((call.args as { request?: unknown })?.request ?? "");
-        const run = (await deps.runWorkflow(workflow, state.chatId, {
-          threadId: state.chatId,
-          tenantId: state.tenantId,
-          userMessage: request,
-          ...(workflow === "invoice" && state.attachments.length
-            ? { attachments: state.attachments }
-            : {}),
-        })) as AssistantWorkflowOutcome;
+        const request = String(
+          (call.args as { request?: unknown })?.request ?? "",
+        );
+        let run: AssistantWorkflowOutcome;
+        try {
+          run = (await withRetry(
+            () =>
+              deps.runWorkflow(workflow, state.chatId, {
+                threadId: state.chatId,
+                tenantId: state.tenantId,
+                userMessage: request,
+                ...(workflow === "invoice" && state.attachments.length
+                  ? { attachments: state.attachments }
+                  : {}),
+              }),
+            { attempts: 2 },
+          )) as AssistantWorkflowOutcome;
+        } catch (err) {
+          // A crashed workflow must not kill the whole assistant run — surface
+          // it to the model as an error tool result and keep going.
+          const message = err instanceof Error ? err.message : String(err);
+          deps.logger.error(
+            { err, chatId: state.chatId, workflow },
+            "workflow tool failed",
+          );
+          messages.push(
+            new ToolMessage(
+              JSON.stringify({ status: "error", message }),
+              callId,
+            ),
+          );
+          continue;
+        }
 
-        if (!outcome || OUTCOME_PRIORITY[run.kind] >= OUTCOME_PRIORITY[outcome.kind]) {
+        if (
+          !outcome ||
+          OUTCOME_PRIORITY[run.kind] >= OUTCOME_PRIORITY[outcome.kind]
+        ) {
           outcome = run;
         }
         // A paused workflow is what the user must answer next.
         if (run.kind === "clarification" || run.kind === "approval") {
           paused = true;
         }
-        messages.push(new ToolMessage(JSON.stringify(toolResultFor(run)), callId));
+        messages.push(
+          new ToolMessage(JSON.stringify(toolResultFor(run)), callId),
+        );
       }
 
       return { messages, outcome, _nextNode: ASSISTANT_NODES.callModel };

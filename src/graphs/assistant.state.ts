@@ -1,5 +1,11 @@
 import { attachmentRefSchema, workflowOutcomeSchema } from "@/schemas";
-import { MessagesValue, StateSchema, UntrackedValue } from "@langchain/langgraph";
+import type { BaseMessage, BaseMessageLike } from "@langchain/core/messages";
+import {
+  messagesStateReducer,
+  ReducedValue,
+  StateSchema,
+  UntrackedValue,
+} from "@langchain/langgraph";
 import { z } from "zod";
 
 /**
@@ -9,7 +15,22 @@ import { z } from "zod";
  * through state, not tool arguments.
  */
 export const AssistantState = new StateSchema({
-  messages: MessagesValue,
+  // Persistent-state bound: keep the last 25 messages. Read-time windowing
+  // (assistant.max_history_messages) sits above this; the reducer cap is what
+  // stops the checkpointed thread growing without bound.
+  messages: new ReducedValue(
+    z.custom<BaseMessage[]>().default(() => []),
+    {
+      inputSchema: z.custom<BaseMessageLike[]>(),
+      reducer: (left, right) => messagesStateReducer(left, right).slice(-25),
+    },
+  ),
+
+  // Step budget for the model↔tools loop; the handler resets it each turn
+  // (negative delta), the max-steps guard in call-model ends runaway loops.
+  stepCount: new ReducedValue(z.number().default(0), {
+    reducer: (previous, next) => previous + next,
+  }),
 
   // Per-turn inputs (the handler passes these on every invoke)
   chatId: z.string(),

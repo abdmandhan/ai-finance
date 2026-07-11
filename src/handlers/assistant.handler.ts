@@ -101,6 +101,16 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
     enablement: { scheduling: boolean; invoicing: boolean };
     workflowReport: AssistantWorkflowOutcome | null;
   }): Promise<{ outcome: AssistantWorkflowOutcome | null; answer: string }> {
+    const runConfig = {
+      configurable: { thread_id: `assistant:${input.chatId}` },
+    };
+    // Reset the checkpointed step budget each turn (stepCount is an
+    // accumulator) — otherwise the max-steps cap builds up across turns and
+    // eventually bricks the chat.
+    const prior = (await assistantGraph.getState(runConfig)) as {
+      values?: { stepCount?: number };
+    };
+    const priorSteps = prior?.values?.stepCount ?? 0;
     const state = (await assistantGraph.invoke(
       {
         messages: [new HumanMessage(input.humanText)],
@@ -111,8 +121,9 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
         enablement: input.enablement,
         workflowReport: input.workflowReport,
         outcome: null,
+        stepCount: -priorSteps,
       },
-      { configurable: { thread_id: `assistant:${input.chatId}` } },
+      runConfig,
     )) as { outcome?: AssistantWorkflowOutcome | null };
     return {
       outcome: state.outcome ?? null,
@@ -151,7 +162,10 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
           logger.info({ chatId, workflow: paused }, "agent disabled — gated");
           return;
         }
-        const resume: ResumeInput = { reply: text, approved: isAffirmative(text) };
+        const resume: ResumeInput = {
+          reply: text,
+          approved: isAffirmative(text),
+        };
         const outcome = (await runWorkflow(
           paused,
           chatId,
@@ -202,7 +216,10 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
       await publish(
         chatId,
         outcome,
-        answer || (outcome ? defaultAnswerFor(outcome) : "Sorry, I could not produce a reply."),
+        answer ||
+          (outcome
+            ? defaultAnswerFor(outcome)
+            : "Sorry, I could not produce a reply."),
       );
       if (outcome?.kind === "result") {
         audit.runFinished({
