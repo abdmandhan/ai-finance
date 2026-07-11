@@ -1,7 +1,8 @@
 import type { Config } from "@/commons";
 import { ChatAnthropic } from "@langchain/anthropic";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import type { BaseMessage } from "@langchain/core/messages";
+import type { AIMessage, BaseMessage } from "@langchain/core/messages";
+import type { StructuredToolInterface } from "@langchain/core/tools";
 import { ChatOpenAI } from "@langchain/openai";
 import type { z } from "zod";
 
@@ -16,6 +17,14 @@ export interface ILlmService {
     messages: BaseMessage[],
     name: string,
   ): Promise<T>;
+  /**
+   * Plain chat turn; binds `tools` when provided. Returns the raw AIMessage,
+   * which may carry `tool_calls` for the caller to execute.
+   */
+  chat(
+    messages: BaseMessage[],
+    options?: { tools?: StructuredToolInterface[] },
+  ): Promise<AIMessage>;
 }
 
 function buildModel(config: Config["llm"]): BaseChatModel {
@@ -44,6 +53,17 @@ export class LlmService implements ILlmService {
   ): Promise<T> {
     const structured = this.model.withStructuredOutput<T>(schema, { name });
     return structured.invoke(messages);
+  }
+
+  async chat(
+    messages: BaseMessage[],
+    options?: { tools?: StructuredToolInterface[] },
+  ): Promise<AIMessage> {
+    const runnable =
+      options?.tools?.length && this.model.bindTools
+        ? this.model.bindTools(options.tools)
+        : this.model;
+    return (await runnable.invoke(messages)) as AIMessage;
   }
 }
 

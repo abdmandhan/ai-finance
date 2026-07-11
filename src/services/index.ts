@@ -1,5 +1,19 @@
 export { createLlmService, LlmService, type ILlmService } from "./llm.service";
 export {
+  agentKeyOf,
+  createPausedWorkflowCheck,
+  createWorkflowRunner,
+  enablementKeyOf,
+  extractInterrupt,
+  isAffirmative,
+  threadKey,
+  type GraphResult,
+  type RunnableGraph,
+  type RunWorkflow,
+  type Workflow,
+  type WorkflowOutcome,
+} from "./workflow-runner";
+export {
   createKafkaService,
   KafkaService,
   type IKafkaService,

@@ -61,6 +61,15 @@ const configSchema = z.object({
       default_expense_account_code: "",
       default_revenue_account_code: "",
     }),
+  assistant: z
+    .object({
+      // Hybrid-assistant handler (conversational agent + workflows-as-tools).
+      // false → rollback to the legacy classify() router (see handlers/legacy.handler.ts).
+      enabled: z.boolean().default(true),
+      // Cap on prior conversation messages replayed to the model each turn.
+      max_history_messages: z.number().default(30),
+    })
+    .default({ enabled: true, max_history_messages: 30 }),
   agents: z
     .object({
       // Backend endpoint that resolves per-tenant/per-member agent enablement, used to gate a

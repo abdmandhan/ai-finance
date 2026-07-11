@@ -3,9 +3,11 @@ import type { OrgDefaultsConfig } from "@/commons";
 import type { ProgressEvent } from "@/schemas";
 import type {
   FetchAttachment,
+  IAuditService,
   ILlmService,
   ResolveAuth,
   ResolveXeroAuth,
+  RunWorkflow,
 } from "@/services";
 import type {
   ICalendarTool,
@@ -90,6 +92,26 @@ export const NODES: Record<string, string> = {
   createEvent: "create_event",
   notify: "notify",
   finalize: "finalize",
+};
+
+/** Dependencies injected into assistant-graph nodes. */
+export interface AssistantDeps {
+  llmService: ILlmService;
+  /** Run/resume a strict workflow graph on its own thread; returns a structured outcome. */
+  runWorkflow: RunWorkflow;
+  audit: IAuditService;
+  /** IANA timezone anchoring "now" in the assistant prompt. */
+  defaultTimezone: string;
+  /** Cap on prior messages replayed to the model each turn. */
+  maxHistoryMessages: number;
+  logger: ILogger;
+  onProgress?: (chatId: string, event: ProgressEvent) => void;
+}
+
+/** Assistant-graph node names. */
+export const ASSISTANT_NODES: Record<string, string> = {
+  callModel: "assistant",
+  executeTools: "execute_workflow_tools",
 };
 
 /** Invoice-graph node names. */
