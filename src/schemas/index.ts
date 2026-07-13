@@ -28,6 +28,27 @@ export {
   type InvoiceResult,
 } from "./invoice.schema";
 export {
+  paymentSchemas,
+  paymentIntentSchema,
+  paymentResultSchema,
+  type PaymentIntent,
+  type PaymentResult,
+} from "./payment.schema";
+export {
+  expenseSchemas,
+  expenseIntentSchema,
+  expenseResultSchema,
+  type ExpenseIntent,
+  type ExpenseResult,
+} from "./expense.schema";
+export {
+  reportSchemas,
+  reportIntentSchema,
+  reportResultSchema,
+  type ReportIntent,
+  type ReportResult,
+} from "./report.schema";
+export {
   workflowClassificationSchema,
   type WorkflowClassification,
 } from "./classify.schema";

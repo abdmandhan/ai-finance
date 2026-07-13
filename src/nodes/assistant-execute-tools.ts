@@ -36,8 +36,9 @@ export const assistantWorkflowTools = [
     name: "create_invoice",
     description: [
       "Create a sales invoice or supplier bill in Xero from the user's request and any",
-      "attached files. Do NOT use it for questions about invoicing concepts, accounting,",
-      "or tax — answer those directly.",
+      "attached files. NOT for payments against existing documents (use record_payment),",
+      "already-paid expenses (use record_expense), or questions about invoicing concepts,",
+      "accounting, or tax — answer those directly.",
     ].join(" "),
     schema: z.object({
       request: z
@@ -45,12 +46,58 @@ export const assistantWorkflowTools = [
         .describe("The user's invoicing request, with every detail they gave"),
     }),
   }),
+  tool(async () => "", {
+    name: "record_payment",
+    description: [
+      "Apply, reverse, or record payments against EXISTING Xero invoices/bills, create or",
+      "allocate credit notes, or void a document. NOT for creating new invoices or bills",
+      "(use create_invoice) and NOT for read-only questions (use financial_report).",
+    ].join(" "),
+    schema: z.object({
+      request: z
+        .string()
+        .describe("The user's payment request, with every detail they gave"),
+    }),
+  }),
+  tool(async () => "", {
+    name: "record_expense",
+    description: [
+      "Record spend-money / receive-money bank transactions or transfers between bank",
+      "accounts in Xero, including from attached receipt photos of ALREADY-PAID expenses.",
+      "NOT for supplier bills payable later (use create_invoice).",
+    ].join(" "),
+    schema: z.object({
+      request: z
+        .string()
+        .describe("The user's expense request, with every detail they gave"),
+    }),
+  }),
+  tool(async () => "", {
+    name: "financial_report",
+    description: [
+      "Answer READ-ONLY financial questions from the user's Xero data: spending, revenue,",
+      "profit, cash, balance sheet, unpaid/overdue invoices and bills, totals by",
+      "supplier/category/period. It never creates or changes anything, so it needs no",
+      "confirmation. NOT for general accounting concepts — answer those directly.",
+    ].join(" "),
+    schema: z.object({
+      request: z
+        .string()
+        .describe("The user's financial question, with every detail they gave"),
+    }),
+  }),
 ];
 
 const workflowOfTool: Record<string, Workflow> = {
   schedule_meeting: "schedule",
   create_invoice: "invoice",
+  record_payment: "payment",
+  record_expense: "expense",
+  financial_report: "report",
 };
+
+/** Workflows whose graphs read/attach the inbound files. */
+const ATTACHMENT_WORKFLOWS: Workflow[] = ["invoice", "expense"];
 
 /** What the model sees as the tool result. */
 function toolResultFor(outcome: AssistantWorkflowOutcome): unknown {
@@ -159,7 +206,8 @@ export function makeAssistantExecuteToolsNode(deps: AssistantDeps) {
                 tenantId: state.tenantId,
                 userId: state.userId,
                 userMessage: request,
-                ...(workflow === "invoice" && state.attachments.length
+                ...(ATTACHMENT_WORKFLOWS.includes(workflow) &&
+                state.attachments.length
                   ? { attachments: state.attachments }
                   : {}),
               }),

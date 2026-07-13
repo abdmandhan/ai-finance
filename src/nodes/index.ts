@@ -2,6 +2,9 @@ export {
   NODES,
   INVOICE_NODES,
   ASSISTANT_NODES,
+  PAYMENT_NODES,
+  EXPENSE_NODES,
+  REPORT_NODES,
   DEFAULT_DURATION_MINUTES,
   MAX_CLARIFY_ATTEMPTS,
   DEFAULT_POST_ARRIVAL_BUFFER_MINUTES,
@@ -11,6 +14,9 @@ export {
   type ScheduleDeps,
   type InvoiceDeps,
   type AssistantDeps,
+  type PaymentDeps,
+  type ExpenseDeps,
+  type ReportDeps,
   type InterruptPayload,
   type ResumeInput,
 } from "./shared";
@@ -39,8 +45,31 @@ export { makeFinalizeNode } from "./finalize";
 export { makeParseInvoiceNode } from "./parse-invoice";
 export { makeAskInvoiceClarificationNode } from "./ask-invoice-clarification";
 export { makeResolveXeroContactNode } from "./resolve-xero-contact";
+export { makeCheckDuplicateInvoiceNode } from "./check-duplicate-invoice";
 export { makeCreateDraftInvoiceNode } from "./create-draft-invoice";
 export { makeAttachInvoiceFileNode } from "./attach-invoice-file";
 export { makeInvoiceApprovalNode } from "./invoice-approval";
 export { makeAuthoriseInvoiceNode } from "./authorise-invoice";
 export { makeFinalizeInvoiceNode } from "./finalize-invoice";
+// Payment (Xero) nodes
+export { makeParsePaymentNode } from "./parse-payment";
+export { makeAskPaymentClarificationNode } from "./ask-payment-clarification";
+export { makeResolvePaymentTargetNode } from "./resolve-payment-target";
+export { makePaymentApprovalNode } from "./payment-approval";
+export { makeExecutePaymentNode } from "./execute-payment";
+export { makeFinalizePaymentNode } from "./finalize-payment";
+// Expense (Xero bank transaction) nodes
+export { makeParseExpenseNode } from "./parse-expense";
+export { makeAskExpenseClarificationNode } from "./ask-expense-clarification";
+export { makeResolveBankAccountsNode } from "./resolve-bank-accounts";
+export { makeExpenseApprovalNode } from "./expense-approval";
+export { makeExecuteExpenseNode } from "./execute-expense";
+export { makeAttachExpenseFileNode } from "./attach-expense-file";
+export { makeFinalizeExpenseNode } from "./finalize-expense";
+// Report (Xero read-only) nodes
+export { makeParseReportNode } from "./parse-report";
+export { makeAskReportClarificationNode } from "./ask-report-clarification";
+export { makeResolveReportPeriodNode } from "./resolve-report-period";
+export { makeFetchReportDataNode, type ReportData } from "./fetch-report-data";
+export { makeComposeReportAnswerNode } from "./compose-report-answer";
+export { makeFinalizeReportNode } from "./finalize-report";

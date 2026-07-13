@@ -50,7 +50,7 @@ function baseInput(over: Record<string, unknown> = {}) {
     tenantId: "tenant-1",
     userId: "user-1",
     attachments: [],
-    enablement: { scheduling: true, invoicing: true },
+    enablement: { scheduling: true, invoicing: true, expense: true },
     workflowReport: null,
     outcome: null,
     ...over,
@@ -191,7 +191,7 @@ describe("assistant graph", () => {
     const result: any = await graph.invoke(
       baseInput({
         messages: [{ role: "user", content: "Invoice Acme" }],
-        enablement: { scheduling: true, invoicing: false },
+        enablement: { scheduling: true, invoicing: false, expense: true },
       }),
       config("t-disabled"),
     );
@@ -313,6 +313,141 @@ describe("assistant graph", () => {
     expect(state.values.messages.length).toBeLessThanOrEqual(25);
     // newest survive the window
     expect(String(state.values.messages.at(-1).content)).toBe("r19");
+  });
+
+  it("routes a payment request to the payment workflow", async () => {
+    const outcome: AssistantWorkflowOutcome = {
+      kind: "approval",
+      workflow: "payment",
+      message: "Record 500 against INV-100?",
+      approval: {
+        name: "xero_apply_payment",
+        provider: "xero",
+        items: [{ ref: "i-100" }],
+      },
+    };
+    const { graph, runWorkflow } = buildGraph({
+      replies: [
+        toolCallMessage("record_payment", "Mark INV-100 as paid from BCA"),
+        new AIMessage("Please approve the payment."),
+      ],
+      outcomes: [outcome],
+    });
+
+    const result: any = await graph.invoke(
+      baseInput({
+        messages: [{ role: "user", content: "Mark INV-100 as paid from BCA" }],
+      }),
+      config("t-payment"),
+    );
+
+    expect(runWorkflow).toHaveBeenCalledWith("payment", "chat-1", {
+      threadId: "chat-1",
+      tenantId: "tenant-1",
+      userId: "user-1",
+      userMessage: "Mark INV-100 as paid from BCA",
+    });
+    expect(result.outcome).toEqual(outcome);
+  });
+
+  it("routes an expense request to the expense workflow WITH attachments", async () => {
+    const { graph, runWorkflow } = buildGraph({
+      replies: [
+        toolCallMessage("record_expense", "record this receipt"),
+        new AIMessage("Please approve."),
+      ],
+      outcomes: [
+        {
+          kind: "approval",
+          workflow: "expense",
+          message: "Record spend of 20?",
+          approval: {
+            name: "xero_spend_money",
+            provider: "xero",
+            items: [{ ref: "090" }],
+          },
+        },
+      ],
+    });
+    const attachments = [
+      { url: "http://minio/r.jpg", mimeType: "image/jpeg", fileName: "r.jpg" },
+    ];
+
+    await graph.invoke(
+      baseInput({
+        messages: [{ role: "user", content: "record this receipt" }],
+        attachments,
+      }),
+      config("t-expense"),
+    );
+
+    expect(runWorkflow).toHaveBeenCalledWith("expense", "chat-1", {
+      threadId: "chat-1",
+      tenantId: "tenant-1",
+      userId: "user-1",
+      userMessage: "record this receipt",
+      attachments,
+    });
+  });
+
+  it("XERO-AI-007: routes a read-only question to the report workflow (no attachments, no approval)", async () => {
+    const outcome: AssistantWorkflowOutcome = {
+      kind: "result",
+      workflow: "report",
+      result: {
+        status: "answered",
+        summary: "Expenses for July 2026: SGD 3,000 (accrual basis).",
+      },
+    };
+    const { graph, runWorkflow } = buildGraph({
+      replies: [
+        toolCallMessage("financial_report", "How much did we spend this month?"),
+        new AIMessage("You spent SGD 3,000 this month."),
+      ],
+      outcomes: [outcome],
+    });
+
+    const result: any = await graph.invoke(
+      baseInput({
+        messages: [{ role: "user", content: "How much did we spend this month?" }],
+        attachments: [
+          { url: "http://x/y.jpg", mimeType: "image/jpeg", fileName: "y.jpg" },
+        ],
+      }),
+      config("t-report-tool"),
+    );
+
+    // Report workflow gets NO attachments — it is read-only.
+    expect(runWorkflow).toHaveBeenCalledWith("report", "chat-1", {
+      threadId: "chat-1",
+      tenantId: "tenant-1",
+      userId: "user-1",
+      userMessage: "How much did we spend this month?",
+    });
+    expect(result.outcome.kind).toBe("result");
+  });
+
+  it("gates the expense workflow on its own enablement flag", async () => {
+    const { graph, runWorkflow } = buildGraph({
+      replies: [
+        toolCallMessage("record_expense", "record $20 parking"),
+        new AIMessage("The expense agent is disabled."),
+      ],
+    });
+
+    const result: any = await graph.invoke(
+      baseInput({
+        messages: [{ role: "user", content: "record $20 parking" }],
+        enablement: { scheduling: true, invoicing: true, expense: false },
+      }),
+      config("t-expense-gated"),
+    );
+
+    expect(runWorkflow).not.toHaveBeenCalled();
+    expect(result.outcome).toEqual({
+      kind: "agent_disabled",
+      workflow: "expense",
+    });
   });
 
   it("injects the workflow report on a resume turn and withholds tools", async () => {

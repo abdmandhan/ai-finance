@@ -3,6 +3,7 @@
  * and the contact/invoice tools. Pure Xero I/O; line-default logic lives in `commons/xero.ts`.
  */
 import type { ILogger } from "@/commons";
+import { buildInvoiceWhere, buildPaymentWhere } from "@/commons/xero-query";
 import type { XeroAuth } from "@/services/xero-auth";
 
 export interface XeroLineItem {
@@ -38,6 +39,151 @@ export interface XeroInvoice {
   CurrencyCode?: string;
 }
 
+/** Fuller invoice shape returned by queries (list/detail reads). */
+export interface XeroInvoiceDetail extends XeroInvoice {
+  Contact?: { ContactID?: string; Name?: string };
+  Date?: string;
+  DueDate?: string;
+  Reference?: string;
+  AmountDue?: number;
+  AmountPaid?: number;
+  AmountCredited?: number;
+  LineItems?: XeroLineItem[];
+}
+
+/**
+ * Typed invoice query — `XeroTool` serializes it to a Xero `where` clause
+ * (`buildInvoiceWhere`); `StubXeroTool` filters its seeded data directly.
+ * Dates are YYYY-MM-DD.
+ */
+export interface InvoiceQuery {
+  type?: InvoiceType;
+  statuses?: string[];
+  contactId?: string;
+  invoiceNumber?: string;
+  reference?: string;
+  dueBefore?: string;
+  dueAfter?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  /** Only invoices with AmountDue > 0. */
+  unpaidOnly?: boolean;
+  amountDueMin?: number;
+}
+
+export interface XeroPaymentInput {
+  Invoice: { InvoiceID?: string; InvoiceNumber?: string };
+  Account: { AccountID?: string; Code?: string };
+  Date: string;
+  Amount: number;
+  Reference?: string;
+}
+
+export interface XeroPayment {
+  PaymentID: string;
+  Status?: string;
+  Amount?: number;
+  Date?: string;
+  Reference?: string;
+  Invoice?: {
+    InvoiceID?: string;
+    InvoiceNumber?: string;
+    Contact?: { Name?: string };
+  };
+}
+
+export interface PaymentQuery {
+  dateFrom?: string;
+  dateTo?: string;
+  reference?: string;
+}
+
+export type BankTransactionType = "SPEND" | "RECEIVE";
+
+export interface XeroBankTransactionInput {
+  Type: BankTransactionType;
+  BankAccount: { AccountID?: string; Code?: string };
+  Contact?: { ContactID: string };
+  LineItems: XeroLineItem[];
+  Date?: string;
+  Reference?: string;
+  LineAmountTypes?: "Exclusive" | "Inclusive" | "NoTax";
+}
+
+export interface XeroBankTransaction {
+  BankTransactionID: string;
+  Type?: string;
+  Status?: string;
+  Total?: number;
+}
+
+export interface XeroBankTransferInput {
+  FromBankAccount: { AccountID?: string; Code?: string };
+  ToBankAccount: { AccountID?: string; Code?: string };
+  Amount: number;
+  Date?: string;
+}
+
+export interface XeroBankTransfer {
+  BankTransferID: string;
+  Amount?: number;
+  Date?: string;
+}
+
+export type CreditNoteType = "ACCRECCREDIT" | "ACCPAYCREDIT";
+
+export interface XeroCreditNoteInput {
+  Type: CreditNoteType;
+  Contact: { ContactID: string };
+  LineItems: XeroLineItem[];
+  Date?: string;
+  Reference?: string;
+  CurrencyCode?: string;
+  Status?: "DRAFT" | "AUTHORISED";
+  LineAmountTypes?: "Exclusive" | "Inclusive" | "NoTax";
+}
+
+export interface XeroCreditNote {
+  CreditNoteID: string;
+  CreditNoteNumber?: string;
+  Status?: string;
+  Total?: number;
+  RemainingCredit?: number;
+}
+
+export interface CreditNoteAllocation {
+  InvoiceID: string;
+  Amount: number;
+  Date?: string;
+}
+
+export type XeroReportName =
+  | "ProfitAndLoss"
+  | "BalanceSheet"
+  | "BankSummary"
+  | "AgedReceivablesByContact"
+  | "AgedPayablesByContact";
+
+export interface XeroReportRow {
+  RowType?: string;
+  Title?: string;
+  Cells?: { Value?: string | number }[];
+  Rows?: XeroReportRow[];
+}
+
+export interface XeroReport {
+  ReportName?: string;
+  ReportTitles?: string[];
+  Rows?: XeroReportRow[];
+}
+
+export interface XeroOrganisation {
+  Name?: string;
+  BaseCurrency?: string;
+  Timezone?: string;
+  CountryCode?: string;
+}
+
 export interface XeroContact {
   ContactID: string;
   Name: string;
@@ -71,6 +217,12 @@ export interface IXeroTool {
     invoices: XeroInvoiceInput[],
   ): Promise<XeroInvoice[]>;
   authoriseInvoice(auth: XeroAuth, invoiceId: string): Promise<XeroInvoice>;
+  updateInvoiceStatus(
+    auth: XeroAuth,
+    invoiceId: string,
+    status: "AUTHORISED" | "VOIDED",
+  ): Promise<XeroInvoice>;
+  getInvoices(auth: XeroAuth, query: InvoiceQuery): Promise<XeroInvoiceDetail[]>;
   attachToInvoice(
     auth: XeroAuth,
     invoiceId: string,
@@ -78,21 +230,59 @@ export interface IXeroTool {
     bytes: Uint8Array,
     contentType: string,
   ): Promise<void>;
+  attachToBankTransaction(
+    auth: XeroAuth,
+    bankTransactionId: string,
+    fileName: string,
+    bytes: Uint8Array,
+    contentType: string,
+  ): Promise<void>;
+  createPayments(
+    auth: XeroAuth,
+    payments: XeroPaymentInput[],
+  ): Promise<XeroPayment[]>;
+  getPayments(auth: XeroAuth, query: PaymentQuery): Promise<XeroPayment[]>;
+  deletePayment(auth: XeroAuth, paymentId: string): Promise<void>;
+  createCreditNotes(
+    auth: XeroAuth,
+    notes: XeroCreditNoteInput[],
+  ): Promise<XeroCreditNote[]>;
+  allocateCreditNote(
+    auth: XeroAuth,
+    creditNoteId: string,
+    allocation: CreditNoteAllocation,
+  ): Promise<void>;
+  createBankTransactions(
+    auth: XeroAuth,
+    transactions: XeroBankTransactionInput[],
+  ): Promise<XeroBankTransaction[]>;
+  createBankTransfer(
+    auth: XeroAuth,
+    transfer: XeroBankTransferInput,
+  ): Promise<XeroBankTransfer>;
+  getReport(
+    auth: XeroAuth,
+    name: XeroReportName,
+    params: Record<string, string>,
+  ): Promise<XeroReport>;
+  getOrganisation(auth: XeroAuth): Promise<XeroOrganisation>;
   getAccounts(auth: XeroAuth): Promise<XeroAccount[]>;
   getTaxRates(auth: XeroAuth): Promise<XeroTaxRate[]>;
 }
 
 const REFERENCE_TTL_MS = 30 * 60_000;
+const INVOICE_PAGE_SIZE = 100;
+const MAX_INVOICE_PAGES = 10;
 
 export class XeroTool implements IXeroTool {
-  // Per-tenant reference cache (accounts / tax rates).
+  // Per-tenant reference cache (accounts / tax rates / organisation).
   private readonly cache = new Map<string, { at: number; value: unknown }>();
 
   constructor(private readonly logger: ILogger) {}
 
   private async request<T = unknown>(
     auth: XeroAuth,
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PUT",
     path: string,
     body?: unknown,
   ): Promise<T> {
@@ -104,7 +294,7 @@ export class XeroTool implements IXeroTool {
         accept: "application/json",
         ...(body ? { "content-type": "application/json" } : {}),
       },
-      ...(method === "POST"
+      ...(method !== "GET"
         ? { body: body ? JSON.stringify(body) : undefined }
         : {}),
     });
@@ -185,28 +375,62 @@ export class XeroTool implements IXeroTool {
     auth: XeroAuth,
     invoiceId: string,
   ): Promise<XeroInvoice> {
+    return this.updateInvoiceStatus(auth, invoiceId, "AUTHORISED");
+  }
+
+  async updateInvoiceStatus(
+    auth: XeroAuth,
+    invoiceId: string,
+    status: "AUTHORISED" | "VOIDED",
+  ): Promise<XeroInvoice> {
     const data = await this.request<{ Invoices?: XeroInvoice[] }>(
       auth,
       "POST",
       "/Invoices",
       {
-        Invoices: [{ InvoiceID: invoiceId, Status: "AUTHORISED" }],
+        Invoices: [{ InvoiceID: invoiceId, Status: status }],
       },
     );
     const inv = data.Invoices?.[0];
-    if (!inv) throw new Error("xero authoriseInvoice returned no invoice");
+    if (!inv)
+      throw new Error(`xero updateInvoiceStatus(${status}) returned no invoice`);
     return inv;
   }
 
-  async attachToInvoice(
+  async getInvoices(
     auth: XeroAuth,
-    invoiceId: string,
+    query: InvoiceQuery,
+  ): Promise<XeroInvoiceDetail[]> {
+    const params: string[] = [];
+    const where = buildInvoiceWhere(query);
+    if (where) params.push(`where=${encodeURIComponent(where)}`);
+    if (query.statuses?.length)
+      params.push(`Statuses=${query.statuses.join(",")}`);
+
+    const all: XeroInvoiceDetail[] = [];
+    for (let page = 1; page <= MAX_INVOICE_PAGES; page++) {
+      const qs = [...params, `page=${page}`].join("&");
+      const data = await this.request<{ Invoices?: XeroInvoiceDetail[] }>(
+        auth,
+        "GET",
+        `/Invoices?${qs}`,
+      );
+      const batch = data.Invoices ?? [];
+      all.push(...batch);
+      if (batch.length < INVOICE_PAGE_SIZE) break;
+    }
+    return all;
+  }
+
+  /** Attachment upload uses a raw Blob body + the file's content type (not JSON). */
+  private async attach(
+    auth: XeroAuth,
+    entityPath: string,
     fileName: string,
     bytes: Uint8Array,
     contentType: string,
   ): Promise<void> {
-    // Attachment upload uses a raw Blob body + the file's content type (not JSON).
-    const path = `/Invoices/${invoiceId}/Attachments/${encodeURIComponent(fileName)}`;
+    const path = `${entityPath}/Attachments/${encodeURIComponent(fileName)}`;
     const res = await fetch(`${auth.apiBaseUrl}${path}`, {
       method: "POST",
       headers: {
@@ -222,7 +446,158 @@ export class XeroTool implements IXeroTool {
         `xero attach ${res.status}: ${extractXeroError(await res.text())}`,
       );
     }
+  }
+
+  async attachToInvoice(
+    auth: XeroAuth,
+    invoiceId: string,
+    fileName: string,
+    bytes: Uint8Array,
+    contentType: string,
+  ): Promise<void> {
+    await this.attach(auth, `/Invoices/${invoiceId}`, fileName, bytes, contentType);
     this.logger.info({ invoiceId, fileName }, "attached file to Xero invoice");
+  }
+
+  async attachToBankTransaction(
+    auth: XeroAuth,
+    bankTransactionId: string,
+    fileName: string,
+    bytes: Uint8Array,
+    contentType: string,
+  ): Promise<void> {
+    await this.attach(
+      auth,
+      `/BankTransactions/${bankTransactionId}`,
+      fileName,
+      bytes,
+      contentType,
+    );
+    this.logger.info(
+      { bankTransactionId, fileName },
+      "attached file to Xero bank transaction",
+    );
+  }
+
+  async createPayments(
+    auth: XeroAuth,
+    payments: XeroPaymentInput[],
+  ): Promise<XeroPayment[]> {
+    const data = await this.request<{ Payments?: XeroPayment[] }>(
+      auth,
+      "PUT",
+      "/Payments",
+      { Payments: payments },
+    );
+    return data.Payments ?? [];
+  }
+
+  async getPayments(
+    auth: XeroAuth,
+    query: PaymentQuery,
+  ): Promise<XeroPayment[]> {
+    const where = buildPaymentWhere(query);
+    const qs = where ? `?where=${encodeURIComponent(where)}` : "";
+    const data = await this.request<{ Payments?: XeroPayment[] }>(
+      auth,
+      "GET",
+      `/Payments${qs}`,
+    );
+    return data.Payments ?? [];
+  }
+
+  async deletePayment(auth: XeroAuth, paymentId: string): Promise<void> {
+    await this.request(auth, "POST", `/Payments/${paymentId}`, {
+      Status: "DELETED",
+    });
+    this.logger.info({ paymentId }, "deleted Xero payment");
+  }
+
+  async createCreditNotes(
+    auth: XeroAuth,
+    notes: XeroCreditNoteInput[],
+  ): Promise<XeroCreditNote[]> {
+    const data = await this.request<{ CreditNotes?: XeroCreditNote[] }>(
+      auth,
+      "PUT",
+      "/CreditNotes",
+      { CreditNotes: notes },
+    );
+    return data.CreditNotes ?? [];
+  }
+
+  async allocateCreditNote(
+    auth: XeroAuth,
+    creditNoteId: string,
+    allocation: CreditNoteAllocation,
+  ): Promise<void> {
+    await this.request(auth, "PUT", `/CreditNotes/${creditNoteId}/Allocations`, {
+      Allocations: [
+        {
+          Amount: allocation.Amount,
+          Invoice: { InvoiceID: allocation.InvoiceID },
+          ...(allocation.Date ? { Date: allocation.Date } : {}),
+        },
+      ],
+    });
+    this.logger.info(
+      { creditNoteId, invoiceId: allocation.InvoiceID },
+      "allocated Xero credit note",
+    );
+  }
+
+  async createBankTransactions(
+    auth: XeroAuth,
+    transactions: XeroBankTransactionInput[],
+  ): Promise<XeroBankTransaction[]> {
+    const data = await this.request<{
+      BankTransactions?: XeroBankTransaction[];
+    }>(auth, "PUT", "/BankTransactions", { BankTransactions: transactions });
+    return data.BankTransactions ?? [];
+  }
+
+  async createBankTransfer(
+    auth: XeroAuth,
+    transfer: XeroBankTransferInput,
+  ): Promise<XeroBankTransfer> {
+    const data = await this.request<{ BankTransfers?: XeroBankTransfer[] }>(
+      auth,
+      "PUT",
+      "/BankTransfers",
+      { BankTransfers: [transfer] },
+    );
+    const t = data.BankTransfers?.[0];
+    if (!t) throw new Error("xero createBankTransfer returned no transfer");
+    return t;
+  }
+
+  async getReport(
+    auth: XeroAuth,
+    name: XeroReportName,
+    params: Record<string, string>,
+  ): Promise<XeroReport> {
+    const qs = new URLSearchParams(params).toString();
+    const data = await this.request<{ Reports?: XeroReport[] }>(
+      auth,
+      "GET",
+      `/Reports/${name}${qs ? `?${qs}` : ""}`,
+    );
+    const report = data.Reports?.[0];
+    if (!report) throw new Error(`xero getReport(${name}) returned no report`);
+    return report;
+  }
+
+  async getOrganisation(auth: XeroAuth): Promise<XeroOrganisation> {
+    return this.cached(auth, "organisation", async () => {
+      const data = await this.request<{ Organisations?: XeroOrganisation[] }>(
+        auth,
+        "GET",
+        "/Organisation",
+      );
+      const org = data.Organisations?.[0];
+      if (!org) throw new Error("xero getOrganisation returned no organisation");
+      return org;
+    });
   }
 
   async getAccounts(auth: XeroAuth): Promise<XeroAccount[]> {
@@ -249,7 +624,7 @@ export class XeroTool implements IXeroTool {
 }
 
 /** Pull Xero's nested ValidationErrors so the failure reason is legible. */
-function extractXeroError(text: string): string {
+export function extractXeroError(text: string): string {
   try {
     const j = JSON.parse(text) as {
       Message?: string;
@@ -274,14 +649,113 @@ function extractXeroError(text: string): string {
   return text.slice(0, 300);
 }
 
-/** Offline stub for Studio / tests. Records writes so tests can assert draft/authorise. */
+/** Seed data for `StubXeroTool` — everything optional; defaults are sensible. */
+export interface StubXeroSeed {
+  contacts?: XeroContact[];
+  invoices?: XeroInvoiceDetail[];
+  accounts?: XeroAccount[];
+  taxRates?: XeroTaxRate[];
+  payments?: XeroPayment[];
+  reports?: Partial<Record<XeroReportName, XeroReport>>;
+  organisation?: XeroOrganisation;
+}
+
+const STUB_DEFAULT_ACCOUNTS: XeroAccount[] = [
+  {
+    Code: "200",
+    Name: "Sales",
+    Type: "REVENUE",
+    Status: "ACTIVE",
+    TaxType: "OUTPUT",
+  },
+  {
+    Code: "400",
+    Name: "Expenses",
+    Type: "EXPENSE",
+    Status: "ACTIVE",
+    TaxType: "INPUT",
+  },
+  { Code: "090", Name: "Business Bank Account", Type: "BANK", Status: "ACTIVE" },
+  { Code: "091", Name: "Savings", Type: "BANK", Status: "ACTIVE" },
+];
+
+const STUB_DEFAULT_PNL: XeroReport = {
+  ReportName: "ProfitAndLoss",
+  Rows: [
+    {
+      RowType: "Section",
+      Title: "Income",
+      Rows: [
+        { RowType: "Row", Cells: [{ Value: "Sales" }, { Value: "5000.00" }] },
+        {
+          RowType: "SummaryRow",
+          Cells: [{ Value: "Total Income" }, { Value: "5000.00" }],
+        },
+      ],
+    },
+    {
+      RowType: "Section",
+      Title: "Less Operating Expenses",
+      Rows: [
+        {
+          RowType: "Row",
+          Cells: [{ Value: "Office Expenses" }, { Value: "3000.00" }],
+        },
+        {
+          RowType: "SummaryRow",
+          Cells: [{ Value: "Total Operating Expenses" }, { Value: "3000.00" }],
+        },
+      ],
+    },
+    {
+      RowType: "Section",
+      Title: "",
+      Rows: [
+        {
+          RowType: "SummaryRow",
+          Cells: [{ Value: "Net Profit" }, { Value: "2000.00" }],
+        },
+      ],
+    },
+  ],
+};
+
+/** Offline stub for Studio / tests. Records writes so tests can assert every operation. */
 export class StubXeroTool implements IXeroTool {
   readonly created: XeroInvoiceInput[] = [];
   readonly authorised: string[] = [];
   readonly upserted: { name: string; email?: string }[] = [];
   readonly attached: { invoiceId: string; fileName: string }[] = [];
+  readonly createdPayments: XeroPaymentInput[] = [];
+  readonly deletedPayments: string[] = [];
+  readonly createdCreditNotes: XeroCreditNoteInput[] = [];
+  readonly allocations: {
+    creditNoteId: string;
+    invoiceId: string;
+    amount: number;
+  }[] = [];
+  readonly bankTransactions: XeroBankTransactionInput[] = [];
+  readonly bankTransfers: XeroBankTransferInput[] = [];
+  readonly attachedToBankTransactions: {
+    bankTransactionId: string;
+    fileName: string;
+  }[] = [];
+  readonly reportRequests: { name: XeroReportName; params: Record<string, string> }[] =
+    [];
+  readonly invoiceQueries: InvoiceQuery[] = [];
+  readonly statusUpdates: { invoiceId: string; status: string }[] = [];
 
-  constructor(private readonly contacts: XeroContact[] = []) {}
+  private readonly contacts: XeroContact[];
+  private readonly invoices: XeroInvoiceDetail[];
+  private readonly payments: XeroPayment[];
+  private readonly seed: StubXeroSeed;
+
+  constructor(seed: XeroContact[] | StubXeroSeed = []) {
+    this.seed = Array.isArray(seed) ? { contacts: seed } : seed;
+    this.contacts = [...(this.seed.contacts ?? [])];
+    this.invoices = [...(this.seed.invoices ?? [])];
+    this.payments = [...(this.seed.payments ?? [])];
+  }
 
   async findContact(_auth: XeroAuth, query: string): Promise<XeroContact[]> {
     const q = query.toLowerCase();
@@ -316,11 +790,60 @@ export class StubXeroTool implements IXeroTool {
   }
 
   async authoriseInvoice(
-    _auth: XeroAuth,
+    auth: XeroAuth,
     invoiceId: string,
   ): Promise<XeroInvoice> {
     this.authorised.push(invoiceId);
-    return { InvoiceID: invoiceId, Status: "AUTHORISED" };
+    return this.updateInvoiceStatus(auth, invoiceId, "AUTHORISED");
+  }
+
+  async updateInvoiceStatus(
+    _auth: XeroAuth,
+    invoiceId: string,
+    status: "AUTHORISED" | "VOIDED",
+  ): Promise<XeroInvoice> {
+    this.statusUpdates.push({ invoiceId, status });
+    const seeded = this.invoices.find((i) => i.InvoiceID === invoiceId);
+    if (seeded) seeded.Status = status;
+    return { InvoiceID: invoiceId, Status: status };
+  }
+
+  async getInvoices(
+    _auth: XeroAuth,
+    query: InvoiceQuery,
+  ): Promise<XeroInvoiceDetail[]> {
+    this.invoiceQueries.push(query);
+    return this.invoices.filter((inv) => {
+      if (query.type && inv.Type !== query.type) return false;
+      if (query.statuses?.length && !query.statuses.includes(inv.Status ?? ""))
+        return false;
+      if (query.contactId && inv.Contact?.ContactID !== query.contactId)
+        return false;
+      if (
+        query.invoiceNumber &&
+        (inv.InvoiceNumber ?? "").toLowerCase() !==
+          query.invoiceNumber.toLowerCase()
+      )
+        return false;
+      if (
+        query.reference &&
+        (inv.Reference ?? "").toLowerCase() !== query.reference.toLowerCase()
+      )
+        return false;
+      if (query.dueBefore && !((inv.DueDate ?? "") < query.dueBefore))
+        return false;
+      if (query.dueAfter && !((inv.DueDate ?? "") >= query.dueAfter))
+        return false;
+      if (query.dateFrom && !((inv.Date ?? "") >= query.dateFrom)) return false;
+      if (query.dateTo && !((inv.Date ?? "") <= query.dateTo)) return false;
+      if (query.unpaidOnly && (inv.AmountDue ?? 0) <= 0) return false;
+      if (
+        query.amountDueMin !== undefined &&
+        (inv.AmountDue ?? 0) < query.amountDueMin
+      )
+        return false;
+      return true;
+    });
   }
 
   async attachToInvoice(
@@ -331,30 +854,168 @@ export class StubXeroTool implements IXeroTool {
     this.attached.push({ invoiceId, fileName });
   }
 
+  async attachToBankTransaction(
+    _auth: XeroAuth,
+    bankTransactionId: string,
+    fileName: string,
+  ): Promise<void> {
+    this.attachedToBankTransactions.push({ bankTransactionId, fileName });
+  }
+
+  async createPayments(
+    _auth: XeroAuth,
+    payments: XeroPaymentInput[],
+  ): Promise<XeroPayment[]> {
+    this.createdPayments.push(...payments);
+    return payments.map((p, i) => {
+      // Reflect the payment on the seeded invoice so later queries see the new balance.
+      const seeded = this.invoices.find(
+        (inv) =>
+          inv.InvoiceID === p.Invoice.InvoiceID ||
+          (p.Invoice.InvoiceNumber &&
+            inv.InvoiceNumber === p.Invoice.InvoiceNumber),
+      );
+      if (seeded) {
+        seeded.AmountPaid = (seeded.AmountPaid ?? 0) + p.Amount;
+        seeded.AmountDue = Math.max(0, (seeded.AmountDue ?? 0) - p.Amount);
+        if (seeded.AmountDue === 0) seeded.Status = "PAID";
+      }
+      const payment: XeroPayment = {
+        PaymentID: `pay_${this.createdPayments.length}_${i}`,
+        Status: "AUTHORISED",
+        Amount: p.Amount,
+        Date: p.Date,
+        Reference: p.Reference,
+        Invoice: {
+          InvoiceID: seeded?.InvoiceID ?? p.Invoice.InvoiceID,
+          InvoiceNumber: seeded?.InvoiceNumber ?? p.Invoice.InvoiceNumber,
+        },
+      };
+      this.payments.push(payment);
+      return payment;
+    });
+  }
+
+  async getPayments(
+    _auth: XeroAuth,
+    query: PaymentQuery,
+  ): Promise<XeroPayment[]> {
+    return this.payments.filter((p) => {
+      if (p.Status === "DELETED") return false;
+      if (query.dateFrom && !((p.Date ?? "") >= query.dateFrom)) return false;
+      if (query.dateTo && !((p.Date ?? "") <= query.dateTo)) return false;
+      if (
+        query.reference &&
+        (p.Reference ?? "").toLowerCase() !== query.reference.toLowerCase()
+      )
+        return false;
+      return true;
+    });
+  }
+
+  async deletePayment(_auth: XeroAuth, paymentId: string): Promise<void> {
+    this.deletedPayments.push(paymentId);
+    const seeded = this.payments.find((p) => p.PaymentID === paymentId);
+    if (seeded) seeded.Status = "DELETED";
+  }
+
+  async createCreditNotes(
+    _auth: XeroAuth,
+    notes: XeroCreditNoteInput[],
+  ): Promise<XeroCreditNote[]> {
+    this.createdCreditNotes.push(...notes);
+    return notes.map((n, i) => {
+      const total = n.LineItems.reduce(
+        (sum, l) => sum + l.Quantity * l.UnitAmount,
+        0,
+      );
+      return {
+        CreditNoteID: `cn_${this.createdCreditNotes.length}_${i}`,
+        CreditNoteNumber: `CN-${this.createdCreditNotes.length}${i}`,
+        Status: n.Status ?? "DRAFT",
+        Total: total,
+        RemainingCredit: total,
+      };
+    });
+  }
+
+  async allocateCreditNote(
+    _auth: XeroAuth,
+    creditNoteId: string,
+    allocation: CreditNoteAllocation,
+  ): Promise<void> {
+    this.allocations.push({
+      creditNoteId,
+      invoiceId: allocation.InvoiceID,
+      amount: allocation.Amount,
+    });
+    const seeded = this.invoices.find(
+      (inv) => inv.InvoiceID === allocation.InvoiceID,
+    );
+    if (seeded) {
+      seeded.AmountCredited = (seeded.AmountCredited ?? 0) + allocation.Amount;
+      seeded.AmountDue = Math.max(0, (seeded.AmountDue ?? 0) - allocation.Amount);
+    }
+  }
+
+  async createBankTransactions(
+    _auth: XeroAuth,
+    transactions: XeroBankTransactionInput[],
+  ): Promise<XeroBankTransaction[]> {
+    this.bankTransactions.push(...transactions);
+    return transactions.map((t, i) => ({
+      BankTransactionID: `bt_${this.bankTransactions.length}_${i}`,
+      Type: t.Type,
+      Status: "AUTHORISED",
+      Total: t.LineItems.reduce((sum, l) => sum + l.Quantity * l.UnitAmount, 0),
+    }));
+  }
+
+  async createBankTransfer(
+    _auth: XeroAuth,
+    transfer: XeroBankTransferInput,
+  ): Promise<XeroBankTransfer> {
+    this.bankTransfers.push(transfer);
+    return {
+      BankTransferID: `xfer_${this.bankTransfers.length}`,
+      Amount: transfer.Amount,
+      Date: transfer.Date,
+    };
+  }
+
+  async getReport(
+    _auth: XeroAuth,
+    name: XeroReportName,
+    params: Record<string, string>,
+  ): Promise<XeroReport> {
+    this.reportRequests.push({ name, params });
+    const seeded = this.seed.reports?.[name];
+    if (seeded) return seeded;
+    if (name === "ProfitAndLoss") return STUB_DEFAULT_PNL;
+    return { ReportName: name, Rows: [] };
+  }
+
+  async getOrganisation(): Promise<XeroOrganisation> {
+    return (
+      this.seed.organisation ?? {
+        Name: "Stub Org",
+        BaseCurrency: "SGD",
+        Timezone: "Asia/Singapore",
+      }
+    );
+  }
+
   async getAccounts(): Promise<XeroAccount[]> {
-    return [
-      {
-        Code: "200",
-        Name: "Sales",
-        Type: "REVENUE",
-        Status: "ACTIVE",
-        TaxType: "OUTPUT",
-      },
-      {
-        Code: "400",
-        Name: "Expenses",
-        Type: "EXPENSE",
-        Status: "ACTIVE",
-        TaxType: "INPUT",
-      },
-    ];
+    return this.seed.accounts ?? STUB_DEFAULT_ACCOUNTS;
   }
 
   async getTaxRates(): Promise<XeroTaxRate[]> {
-    return [
-      { TaxType: "NONE", EffectiveRate: 0, Status: "ACTIVE" },
-      { TaxType: "GST9", EffectiveRate: 9, Status: "ACTIVE" },
-    ];
+    return (
+      this.seed.taxRates ?? [
+        { TaxType: "NONE", EffectiveRate: 0, Status: "ACTIVE" },
+        { TaxType: "GST9", EffectiveRate: 9, Status: "ACTIVE" },
+      ]
+    );
   }
 }
 

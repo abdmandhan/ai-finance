@@ -38,8 +38,12 @@ export const AssistantState = new StateSchema({
   userId: z.string().default(""),
   attachments: z.array(attachmentRefSchema).default(() => []),
   enablement: z
-    .object({ scheduling: z.boolean(), invoicing: z.boolean() })
-    .default({ scheduling: false, invoicing: false }),
+    .object({
+      scheduling: z.boolean(),
+      invoicing: z.boolean(),
+      expense: z.boolean().default(false),
+    })
+    .default({ scheduling: false, invoicing: false, expense: false }),
 
   // Resume turn: structured result of a just-finished workflow to phrase for the user.
   workflowReport: workflowOutcomeSchema.nullish(),

@@ -5,6 +5,9 @@
   "graphs": {
     "assistant": "./src/graphs/assistant-dev.ts:graph",
     "schedule": "./src/graphs/schedule-dev.ts:graph",
-    "invoice": "./src/graphs/invoice-dev.ts:graph"
+    "invoice": "./src/graphs/invoice-dev.ts:graph",
+    "payment": "./src/graphs/payment-dev.ts:graph",
+    "expense": "./src/graphs/expense-dev.ts:graph",
+    "report": "./src/graphs/report-dev.ts:graph"
   }
 }

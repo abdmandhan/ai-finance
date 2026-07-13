@@ -3,6 +3,7 @@ import {
   makeAskInvoiceClarificationNode,
   makeAttachInvoiceFileNode,
   makeAuthoriseInvoiceNode,
+  makeCheckDuplicateInvoiceNode,
   makeCreateDraftInvoiceNode,
   makeFinalizeInvoiceNode,
   makeInvoiceApprovalNode,
@@ -31,6 +32,7 @@ export function buildInvoiceGraph(
   const parse = makeParseInvoiceNode(deps);
   const clarify = makeAskInvoiceClarificationNode(deps);
   const resolveContact = makeResolveXeroContactNode(deps);
+  const checkDuplicate = makeCheckDuplicateInvoiceNode(deps);
   const createDraft = makeCreateDraftInvoiceNode(deps);
   const attach = makeAttachInvoiceFileNode(deps);
   const approval = makeInvoiceApprovalNode(deps);
@@ -41,6 +43,7 @@ export function buildInvoiceGraph(
     .addNode(parse.name, parse.node)
     .addNode(clarify.name, clarify.node)
     .addNode(resolveContact.name, resolveContact.node)
+    .addNode(checkDuplicate.name, checkDuplicate.node)
     .addNode(createDraft.name, createDraft.node)
     .addNode(attach.name, attach.node)
     .addNode(approval.name, approval.node)
@@ -59,6 +62,11 @@ export function buildInvoiceGraph(
     .addEdge(INVOICE_NODES.askClarification, INVOICE_NODES.parseInvoice)
     .addConditionalEdges(
       INVOICE_NODES.resolveContact,
+      routeByNextNode,
+      pathMap(INVOICE_NODES.checkDuplicate, INVOICE_NODES.finalize),
+    )
+    .addConditionalEdges(
+      INVOICE_NODES.checkDuplicate,
       routeByNextNode,
       pathMap(INVOICE_NODES.createDraft, INVOICE_NODES.finalize),
     )

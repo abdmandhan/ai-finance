@@ -4,7 +4,7 @@ import type { RunnableConfig } from "@langchain/core/runnables";
 import type { AgentEnablement } from "./agent-enablement";
 
 /** The strict workflows this service can run. Each one is a compiled LangGraph graph. */
-export type Workflow = "schedule" | "invoice";
+export type Workflow = "schedule" | "invoice" | "payment" | "expense" | "report";
 
 /** Minimal graph surface the runner needs — avoids unioning the two giant compiled types. */
 export interface RunnableGraph {
@@ -12,13 +12,20 @@ export interface RunnableGraph {
   getState(config: RunnableConfig): Promise<unknown>;
 }
 
-/** Result shape produced by either graph's finalize node. */
+/** Result shape produced by any workflow graph's finalize node. */
 export interface GraphResult {
   status: string;
   summary: string;
   eventId?: string;
   htmlLink?: string;
   invoiceId?: string;
+  paymentId?: string;
+  creditNoteId?: string;
+  bankTransactionId?: string;
+  transferId?: string;
+  remainingAmountDue?: number;
+  period?: { from: string; to: string; label: string };
+  basis?: string;
   suggestedSlots?: { start: string; end: string }[];
 }
 
@@ -45,15 +52,20 @@ export type WorkflowOutcome =
 export const agentKeyOf: Record<Workflow, string> = {
   schedule: "scheduling",
   invoice: "invoicing",
+  payment: "invoicing",
+  expense: "expense",
+  report: "invoicing",
 };
 
 /** Which enablement flag gates each workflow (the graph IS that agent). */
-export const enablementKeyOf: Record<
-  Workflow,
-  Extract<keyof AgentEnablement, "scheduling" | "invoicing">
-> = {
+export const enablementKeyOf: Record<Workflow, keyof AgentEnablement> = {
   schedule: "scheduling",
   invoice: "invoicing",
+  // Payments and read-only reports ride the invoicing flag: same Xero connection,
+  // same accounting surface. Expense has its own backend flag.
+  payment: "invoicing",
+  expense: "expense",
+  report: "invoicing",
 };
 
 /** Per-workflow thread namespace so graph checkpoints never collide on one chat. */
@@ -65,6 +77,22 @@ export function extractInterrupt(result: unknown): InterruptPayload | null {
   const interrupts = (result as { __interrupt__?: Array<{ value?: unknown }> })
     ?.__interrupt__;
   return (interrupts?.[0]?.value as InterruptPayload | undefined) ?? null;
+}
+
+/**
+ * When a workflow graph is invoked from INSIDE another graph's node (the
+ * assistant), LangGraph treats it as a nested run and an `interrupt()` in the
+ * child THROWS a GraphInterrupt instead of returning `__interrupt__` — even
+ * with an explicit thread config. The child's pause is already checkpointed on
+ * its own thread, so the throw is just the delivery mechanism: unwrap it.
+ */
+function interruptFromError(err: unknown): InterruptPayload | null {
+  const e = err as {
+    name?: string;
+    interrupts?: Array<{ value?: unknown }>;
+  } | null;
+  if (e?.name !== "GraphInterrupt") return null;
+  return (e.interrupts?.[0]?.value as InterruptPayload | undefined) ?? null;
 }
 
 export function isAffirmative(text: string): boolean {
@@ -86,12 +114,19 @@ export function createWorkflowRunner(deps: {
 }): RunWorkflow {
   return async function runWorkflow(workflow, chatId, input) {
     // Explicit config only — never the parent's — so the workflow keeps its own
-    // thread and its interrupt() surfaces on this invoke instead of bubbling up.
-    const raw = (await deps.graphs[workflow].invoke(input, {
-      configurable: { thread_id: threadKey(workflow, chatId) },
-    })) as { result?: GraphResult };
-
-    const pending = extractInterrupt(raw);
+    // thread. Top-level invokes surface the interrupt on the result; nested
+    // invokes (assistant tool calls) deliver it as a GraphInterrupt throw.
+    let raw: { result?: GraphResult } = {};
+    let pending: InterruptPayload | null = null;
+    try {
+      raw = (await deps.graphs[workflow].invoke(input, {
+        configurable: { thread_id: threadKey(workflow, chatId) },
+      })) as { result?: GraphResult };
+      pending = extractInterrupt(raw);
+    } catch (err) {
+      pending = interruptFromError(err);
+      if (!pending) throw err;
+    }
     if (pending?.kind === "approval") {
       return {
         kind: "approval",
@@ -116,7 +151,13 @@ export function createPausedWorkflowCheck(
   graphs: Record<Workflow, RunnableGraph>,
 ): (chatId: string) => Promise<Workflow | null> {
   return async function pausedWorkflow(chatId) {
-    for (const wf of ["invoice", "schedule"] as Workflow[]) {
+    for (const wf of [
+      "invoice",
+      "payment",
+      "expense",
+      "report",
+      "schedule",
+    ] as Workflow[]) {
       const snapshot = await graphs[wf].getState({
         configurable: { thread_id: threadKey(wf, chatId) },
       });

@@ -546,6 +546,20 @@ Finish
 
 ---
 
+# Testing & Evals
+
+Two layers, both keyed to the catalogue IDs in `../XERO-TEST-CASE-PLAN.md`
+(coverage matrix: `docs/xero-test-coverage.md`):
+
+- **Deterministic** — `pnpm test` (mocked LLM + `StubXeroTool`, runs in CI).
+  Filter a catalogue category: `pnpm test -- -t XERO-PAY`.
+- **Live-LLM evals** — `pnpm eval` (real model from `config.toml [llm]`,
+  StubXeroTool for all Xero I/O; never in default CI). Cases live in
+  `evals/cases/*.cases.ts`; multimodal receipt cases skip until image fixtures
+  are dropped into `evals/fixtures/receipts/`.
+
+---
+
 # Future Roadmap
 
 - [ ] Durable checkpoint storage
@@ -554,7 +568,7 @@ Finish
 - [ ] Reflection
 - [ ] Organization memory
 - [ ] Long-term memory
-- [ ] AI evaluation pipeline
+- [x] AI evaluation pipeline (`pnpm eval` — see Testing & Evals)
 - [ ] Cost tracking
 - [ ] Token usage dashboard
 - [ ] Prompt versioning

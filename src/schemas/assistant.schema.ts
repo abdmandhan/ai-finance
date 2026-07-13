@@ -6,7 +6,13 @@ import { z } from "zod";
  * A fourth kind, `agent_disabled`, marks a gated tool call.
  */
 
-export const workflowNameSchema = z.enum(["schedule", "invoice"]);
+export const workflowNameSchema = z.enum([
+  "schedule",
+  "invoice",
+  "payment",
+  "expense",
+  "report",
+]);
 
 export const workflowOutcomeSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -33,6 +39,15 @@ export const workflowOutcomeSchema = z.discriminatedUnion("kind", [
       eventId: z.string().optional(),
       htmlLink: z.string().optional(),
       invoiceId: z.string().optional(),
+      paymentId: z.string().optional(),
+      creditNoteId: z.string().optional(),
+      bankTransactionId: z.string().optional(),
+      transferId: z.string().optional(),
+      remainingAmountDue: z.number().optional(),
+      period: z
+        .object({ from: z.string(), to: z.string(), label: z.string() })
+        .optional(),
+      basis: z.string().optional(),
       suggestedSlots: z
         .array(z.object({ start: z.string(), end: z.string() }))
         .optional(),

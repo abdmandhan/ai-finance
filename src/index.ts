@@ -1,7 +1,10 @@
 import { configUtils, loggerUtils } from "@/commons";
 import {
   buildAssistantGraph,
+  buildExpenseGraph,
   buildInvoiceGraph,
+  buildPaymentGraph,
+  buildReportGraph,
   buildScheduleGraph,
 } from "@/graphs";
 import {
@@ -81,13 +84,18 @@ async function main(): Promise<void> {
     checkpointer,
   );
 
+  // The Xero write/read workflows share one XeroTool (per-tenant reference cache)
+  // and one auth resolver.
+  const xeroTool = createXeroTool(logger);
+  const resolveXeroAuth = createResolveXeroAuth(
+    config.xero.token_endpoint_base_url,
+  );
+
   const invoiceGraph = buildInvoiceGraph(
     {
       llmService,
-      xeroTool: createXeroTool(logger),
-      resolveXeroAuth: createResolveXeroAuth(
-        config.xero.token_endpoint_base_url,
-      ),
+      xeroTool,
+      resolveXeroAuth,
       orgDefaults: {
         taxType: config.xero.default_tax_type,
         expenseAccountCode: config.xero.default_expense_account_code,
@@ -100,9 +108,39 @@ async function main(): Promise<void> {
     checkpointer,
   );
 
+  const paymentGraph = buildPaymentGraph(
+    { llmService, xeroTool, resolveXeroAuth, logger, onProgress },
+    checkpointer,
+  );
+
+  const expenseGraph = buildExpenseGraph(
+    {
+      llmService,
+      xeroTool,
+      resolveXeroAuth,
+      orgDefaults: {
+        taxType: config.xero.default_tax_type,
+        expenseAccountCode: config.xero.default_expense_account_code,
+        revenueAccountCode: config.xero.default_revenue_account_code,
+      },
+      fetchAttachment: createFetchAttachment(),
+      logger,
+      onProgress,
+    },
+    checkpointer,
+  );
+
+  const reportGraph = buildReportGraph(
+    { llmService, xeroTool, resolveXeroAuth, logger, onProgress },
+    checkpointer,
+  );
+
   const graphs: Record<Workflow, RunnableGraph> = {
     schedule: scheduleGraph as unknown as RunnableGraph,
     invoice: invoiceGraph as unknown as RunnableGraph,
+    payment: paymentGraph as unknown as RunnableGraph,
+    expense: expenseGraph as unknown as RunnableGraph,
+    report: reportGraph as unknown as RunnableGraph,
   };
   const runWorkflow = createWorkflowRunner({ graphs, logger });
   const pausedWorkflow = createPausedWorkflowCheck(graphs);

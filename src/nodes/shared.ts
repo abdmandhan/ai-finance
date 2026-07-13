@@ -128,11 +128,82 @@ export const INVOICE_NODES: Record<string, string> = {
   parseInvoice: "parse_invoice",
   askClarification: "ask_clarification",
   resolveContact: "resolve_xero_contact",
+  checkDuplicate: "check_duplicate_invoice",
   createDraft: "create_draft_invoice",
   attach: "attach_invoice_file",
   approval: "invoice_approval",
   authorise: "authorise_invoice",
   finalize: "finalize_invoice",
+};
+
+/**
+ * Dependencies injected into payment-graph nodes. Payments/credit notes/voids are
+ * immediately-effective writes — no DRAFT stage — so nodes gate on approval BEFORE writing.
+ */
+export interface PaymentDeps {
+  llmService: ILlmService;
+  xeroTool: IXeroTool;
+  resolveXeroAuth: ResolveXeroAuth;
+  logger: ILogger;
+  /** Injectable clock for deterministic tests; defaults to `() => new Date()`. */
+  now?: () => Date;
+  onProgress?: (chatId: string, event: ProgressEvent) => void;
+}
+
+/** Payment-graph node names. */
+export const PAYMENT_NODES: Record<string, string> = {
+  parsePayment: "parse_payment",
+  askClarification: "ask_payment_clarification",
+  resolveTarget: "resolve_payment_target",
+  approval: "payment_approval",
+  execute: "execute_payment",
+  finalize: "finalize_payment",
+};
+
+/** Dependencies injected into expense-graph nodes (spend/receive money + transfers). */
+export interface ExpenseDeps {
+  llmService: ILlmService;
+  xeroTool: IXeroTool;
+  resolveXeroAuth: ResolveXeroAuth;
+  orgDefaults: OrgDefaultsConfig;
+  /** Download an attachment's bytes/data-url. Optional — image reading + attach skip when absent. */
+  fetchAttachment?: FetchAttachment;
+  logger: ILogger;
+  /** Injectable clock for deterministic tests; defaults to `() => new Date()`. */
+  now?: () => Date;
+  onProgress?: (chatId: string, event: ProgressEvent) => void;
+}
+
+/** Expense-graph node names. */
+export const EXPENSE_NODES: Record<string, string> = {
+  parseExpense: "parse_expense",
+  askClarification: "ask_expense_clarification",
+  resolveAccounts: "resolve_bank_accounts",
+  approval: "expense_approval",
+  execute: "execute_expense",
+  attach: "attach_expense_file",
+  finalize: "finalize_expense",
+};
+
+/** Dependencies injected into report-graph nodes (read-only — no write tools used). */
+export interface ReportDeps {
+  llmService: ILlmService;
+  xeroTool: IXeroTool;
+  resolveXeroAuth: ResolveXeroAuth;
+  logger: ILogger;
+  /** Injectable clock for deterministic tests; defaults to `() => new Date()`. */
+  now?: () => Date;
+  onProgress?: (chatId: string, event: ProgressEvent) => void;
+}
+
+/** Report-graph node names. NOTE: deliberately no approval node — read-only by construction. */
+export const REPORT_NODES: Record<string, string> = {
+  parseReport: "parse_report",
+  askClarification: "ask_report_clarification",
+  resolvePeriod: "resolve_report_period",
+  fetchData: "fetch_report_data",
+  composeAnswer: "compose_report_answer",
+  finalize: "finalize_report",
 };
 
 export const DEFAULT_DURATION_MINUTES = 30;

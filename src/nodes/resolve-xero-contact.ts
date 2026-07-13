@@ -29,13 +29,13 @@ export function makeResolveXeroContactNode(deps: InvoiceDeps) {
         if (contact) {
           return {
             contactId: contact.ContactID,
-            _nextNode: INVOICE_NODES.createDraft,
+            _nextNode: INVOICE_NODES.checkDuplicate,
           };
         }
 
         const contactId = await deps.xeroTool.upsertContact(auth, { name });
         deps.logger.info({ name, contactId }, "created Xero contact");
-        return { contactId, _nextNode: INVOICE_NODES.createDraft };
+        return { contactId, _nextNode: INVOICE_NODES.checkDuplicate };
       } catch (err) {
         deps.logger.error({ err }, "resolve-xero-contact failed");
         return {

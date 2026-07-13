@@ -3,7 +3,11 @@ import { pino } from "pino";
 import { Command, MemorySaver } from "@langchain/langgraph";
 import type { InvoiceIntent } from "@/schemas";
 import type { ILlmService, XeroAuth } from "@/services";
-import { StubXeroTool, type XeroContact } from "@/tools";
+import {
+  StubXeroTool,
+  type StubXeroSeed,
+  type XeroContact,
+} from "@/tools";
 import type { InvoiceDeps } from "@/nodes";
 import { buildInvoiceGraph } from "./invoice.graph";
 
@@ -36,6 +40,7 @@ function buildGraph(
   opts: {
     intents?: InvoiceIntent[];
     contacts?: XeroContact[];
+    seed?: StubXeroSeed;
     withFetch?: boolean;
   } = {},
 ) {
@@ -44,7 +49,7 @@ function buildGraph(
   for (const i of opts.intents ?? [intent()]) extract.mockResolvedValueOnce(i);
   const llmService: ILlmService = { invoke: vi.fn(), extract, chat: vi.fn() };
   const xeroTool = new StubXeroTool(
-    opts.contacts ?? [{ ContactID: "c-acme", Name: "Acme" }],
+    opts.seed ?? opts.contacts ?? [{ ContactID: "c-acme", Name: "Acme" }],
   );
   const fetchAttachment = vi.fn(async () => ({
     bytes: new Uint8Array([1, 2, 3]),
@@ -209,6 +214,110 @@ describe("invoice graph — draft → approve → authorise", () => {
     const svc = inv.LineItems.find((l) => l.Description === "Service charge");
     expect(svc?.UnitAmount).toBe(10);
     expect(svc?.TaxType).toBe("GST9");
+  });
+
+  it("XERO-DOC-029 / XERO-ERR-010: detects a duplicate reference and asks before creating", async () => {
+    const seed: StubXeroSeed = {
+      contacts: [{ ContactID: "c-sup", Name: "Supplier Co" }],
+      invoices: [
+        {
+          InvoiceID: "i-dup",
+          InvoiceNumber: "BILL-77",
+          Type: "ACCPAY",
+          Status: "AUTHORISED",
+          Contact: { ContactID: "c-sup", Name: "Supplier Co" },
+          Reference: "INV-2026-0311",
+          Total: 111,
+          AmountDue: 111,
+        },
+      ],
+    };
+    const dupIntent = intent({
+      docType: "bill",
+      contactName: "Supplier Co",
+      reference: "INV-2026-0311",
+    });
+    const { graph, xeroTool } = buildGraph({ intents: [dupIntent], seed });
+    const config = { configurable: { thread_id: "inv-dup" } };
+
+    const paused: any = await graph.invoke(
+      {
+        threadId: "inv-dup",
+        tenantId: "tenant-1",
+        userMessage: "create a bill from this invoice",
+      },
+      config,
+    );
+    // Paused BEFORE creating anything.
+    expect(paused.__interrupt__?.[0]?.value?.kind).toBe("clarification");
+    expect(paused.__interrupt__?.[0]?.value?.message).toContain("already exists");
+    expect(xeroTool.created).toHaveLength(0);
+
+    // "cancel" → nothing created, existing document referenced.
+    const resumed: any = await graph.invoke(
+      new Command({ resume: { reply: "cancel" } }),
+      config,
+    );
+    expect(resumed.result.status).toBe("rejected");
+    expect(xeroTool.created).toHaveLength(0);
+  });
+
+  it("XERO-DOC-029: 'create anyway' proceeds past the duplicate check", async () => {
+    const seed: StubXeroSeed = {
+      contacts: [{ ContactID: "c-sup", Name: "Supplier Co" }],
+      invoices: [
+        {
+          InvoiceID: "i-dup",
+          InvoiceNumber: "BILL-77",
+          Type: "ACCPAY",
+          Status: "AUTHORISED",
+          Contact: { ContactID: "c-sup", Name: "Supplier Co" },
+          Reference: "INV-2026-0311",
+          Total: 111,
+          AmountDue: 111,
+        },
+      ],
+    };
+    const dupIntent = intent({
+      docType: "bill",
+      contactName: "Supplier Co",
+      reference: "INV-2026-0311",
+    });
+    const { graph, xeroTool } = buildGraph({ intents: [dupIntent], seed });
+    const config = { configurable: { thread_id: "inv-dup-force" } };
+
+    await graph.invoke(
+      {
+        threadId: "inv-dup-force",
+        tenantId: "tenant-1",
+        userMessage: "create a bill from this invoice",
+      },
+      config,
+    );
+    const paused: any = await graph.invoke(
+      new Command({ resume: { reply: "create anyway" } }),
+      config,
+    );
+    // Draft created; now at the usual approval gate.
+    expect(xeroTool.created).toHaveLength(1);
+    expect(paused.__interrupt__?.[0]?.value?.kind).toBe("approval");
+  });
+
+  it("skips the duplicate check when no reference was extracted", async () => {
+    const { graph, xeroTool } = buildGraph();
+    const config = { configurable: { thread_id: "inv-noref" } };
+    const paused: any = await graph.invoke(
+      {
+        threadId: "inv-noref",
+        tenantId: "tenant-1",
+        userMessage: "invoice Acme 10 hours at 150",
+      },
+      config,
+    );
+    // Straight to draft + approval — no duplicate lookup was made.
+    expect(xeroTool.invoiceQueries).toHaveLength(0);
+    expect(xeroTool.created).toHaveLength(1);
+    expect(paused.__interrupt__?.[0]?.value?.kind).toBe("approval");
   });
 
   it("creates an ACCPAY bill for a supplier expense", async () => {
