@@ -5,6 +5,7 @@ import {
   LLM_MODEL_PRICES_SEED_DML,
   LLM_MODEL_PRICES_TABLE_DDL,
   PROCESS_LOG_INDEX_DDL,
+  PROCESS_LOG_LLM_COLUMNS_DDL,
   PROCESS_LOG_TABLE_DDL,
   ProcessLogService,
   sanitizeForProcessLog,
@@ -109,6 +110,60 @@ describe("ProcessLogService", () => {
     expect(calls[0][1]).toContain("chat-2");
   });
 
+  it("stores LLM usage and cost in typed columns", async () => {
+    const log = logger();
+    const query = vi.fn(async () => ({ rowCount: 1 }));
+    const svc = new ProcessLogService(enabledConfig, log, "postgres://db", () =>
+      pool(query),
+    );
+
+    await svc.runWithContext({ chatId: "chat-llm" }, async () => {
+      svc.log({
+        event: "assistant.model_call",
+        stage: "llm.chat.end",
+        payload: { ok: true },
+        llm: {
+          provider: "openai",
+          model: "gpt-5.4-mini",
+          modelKey: "openai:gpt-5.4-mini",
+          modelSize: "large",
+          inputTokens: 1_000,
+          cachedInputTokens: 200,
+          outputTokens: 100,
+          totalTokens: 1_100,
+          costEstimated: 0.001065,
+          costCurrency: "USD",
+          costStatus: "estimated",
+          priceId: "42",
+          processingTier: "standard",
+          contextTier: "short",
+        },
+      });
+    });
+    await svc.flush();
+
+    const calls = query.mock.calls as unknown as [string, unknown[]][];
+    expect(calls[0][0]).toContain("llm_provider");
+    expect(calls[0][0]).toContain("llm_cost_estimated");
+    expect(calls[0][1].slice(18)).toEqual([
+      "openai",
+      "gpt-5.4-mini",
+      "openai:gpt-5.4-mini",
+      "large",
+      1_000,
+      200,
+      null,
+      100,
+      1_100,
+      0.001065,
+      "USD",
+      "estimated",
+      "42",
+      "standard",
+      "short",
+    ]);
+  });
+
   it("creates storage and retries once when the process log table is missing", async () => {
     const log = logger();
     let insertAttempts = 0;
@@ -136,6 +191,9 @@ describe("ProcessLogService", () => {
     const sqlCalls = query.mock.calls.map(([sql]) => sql);
     expect(insertAttempts).toBe(2);
     expect(sqlCalls).toContain(PROCESS_LOG_TABLE_DDL);
+    for (const sql of PROCESS_LOG_LLM_COLUMNS_DDL) {
+      expect(sqlCalls).toContain(sql);
+    }
     for (const sql of PROCESS_LOG_INDEX_DDL) {
       expect(sqlCalls).toContain(sql);
     }
@@ -218,12 +276,17 @@ describe("ProcessLogService", () => {
 
     expect(p.query).toHaveBeenCalledTimes(
       1 +
+        PROCESS_LOG_LLM_COLUMNS_DDL.length +
         PROCESS_LOG_INDEX_DDL.length +
         1 +
         LLM_MODEL_PRICES_INDEX_DDL.length +
         LLM_MODEL_PRICES_SEED_DML.length,
     );
     expect(p.query).toHaveBeenCalledWith(PROCESS_LOG_TABLE_DDL);
+    for (const sql of PROCESS_LOG_LLM_COLUMNS_DDL) {
+      expect(p.query).toHaveBeenCalledWith(sql);
+      expect(sql).toContain("ADD COLUMN IF NOT EXISTS");
+    }
     for (const sql of PROCESS_LOG_INDEX_DDL) {
       expect(p.query).toHaveBeenCalledWith(sql);
       expect(sql).toContain("IF NOT EXISTS");

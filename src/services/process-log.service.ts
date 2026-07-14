@@ -23,6 +23,25 @@ export interface ProcessLogEntry {
   durationMs?: number;
   payload?: unknown;
   error?: unknown;
+  llm?: ProcessLogLlmMetrics;
+}
+
+export interface ProcessLogLlmMetrics {
+  provider?: string;
+  model?: string;
+  modelKey?: string;
+  modelSize?: string;
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  cacheWriteTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  costEstimated?: number;
+  costCurrency?: string;
+  costStatus?: string;
+  priceId?: string | number;
+  processingTier?: string;
+  contextTier?: string;
 }
 
 export interface IProcessLogService {
@@ -54,6 +73,7 @@ interface ProcessLogRow extends StoredProcessLogContext {
   durationMs?: number;
   payload?: unknown;
   error?: unknown;
+  llm?: ProcessLogLlmMetrics;
 }
 
 export interface ProcessLogPool {
@@ -103,6 +123,45 @@ export const PROCESS_LOG_INDEX_DDL = [
      ON graph_process_logs (trace_id, seq)`,
   `CREATE INDEX IF NOT EXISTS graph_process_logs_created_idx
      ON graph_process_logs (created_at)`,
+  `CREATE INDEX IF NOT EXISTS graph_process_logs_llm_tenant_created_idx
+     ON graph_process_logs (tenant_id, created_at)
+     WHERE llm_provider IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS graph_process_logs_llm_model_created_idx
+     ON graph_process_logs (llm_provider, llm_model, created_at)
+     WHERE llm_provider IS NOT NULL`,
+];
+
+export const PROCESS_LOG_LLM_COLUMNS_DDL = [
+  `ALTER TABLE graph_process_logs
+     ADD COLUMN IF NOT EXISTS llm_provider text`,
+  `ALTER TABLE graph_process_logs
+     ADD COLUMN IF NOT EXISTS llm_model text`,
+  `ALTER TABLE graph_process_logs
+     ADD COLUMN IF NOT EXISTS llm_model_key text`,
+  `ALTER TABLE graph_process_logs
+     ADD COLUMN IF NOT EXISTS llm_model_size text`,
+  `ALTER TABLE graph_process_logs
+     ADD COLUMN IF NOT EXISTS llm_input_tokens integer`,
+  `ALTER TABLE graph_process_logs
+     ADD COLUMN IF NOT EXISTS llm_cached_input_tokens integer`,
+  `ALTER TABLE graph_process_logs
+     ADD COLUMN IF NOT EXISTS llm_cache_write_tokens integer`,
+  `ALTER TABLE graph_process_logs
+     ADD COLUMN IF NOT EXISTS llm_output_tokens integer`,
+  `ALTER TABLE graph_process_logs
+     ADD COLUMN IF NOT EXISTS llm_total_tokens integer`,
+  `ALTER TABLE graph_process_logs
+     ADD COLUMN IF NOT EXISTS llm_cost_estimated numeric(18, 12)`,
+  `ALTER TABLE graph_process_logs
+     ADD COLUMN IF NOT EXISTS llm_cost_currency text`,
+  `ALTER TABLE graph_process_logs
+     ADD COLUMN IF NOT EXISTS llm_cost_status text`,
+  `ALTER TABLE graph_process_logs
+     ADD COLUMN IF NOT EXISTS llm_price_id bigint`,
+  `ALTER TABLE graph_process_logs
+     ADD COLUMN IF NOT EXISTS llm_processing_tier text`,
+  `ALTER TABLE graph_process_logs
+     ADD COLUMN IF NOT EXISTS llm_context_tier text`,
 ];
 
 export const LLM_MODEL_PRICES_TABLE_DDL = `
@@ -216,8 +275,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function isMissingRelationError(err: unknown): boolean {
-  return isRecord(err) && err.code === "42P01";
+function isMissingStorageError(err: unknown): boolean {
+  return isRecord(err) && (err.code === "42P01" || err.code === "42703");
 }
 
 function sanitizeValue(value: unknown, seen = new WeakSet<object>()): unknown {
@@ -285,6 +344,7 @@ export function sanitizeForProcessLog(
 
 async function setupProcessLogDbWithPool(pool: ProcessLogPool): Promise<void> {
   await pool.query(PROCESS_LOG_TABLE_DDL);
+  for (const sql of PROCESS_LOG_LLM_COLUMNS_DDL) await pool.query(sql);
   for (const sql of PROCESS_LOG_INDEX_DDL) await pool.query(sql);
   await setupLlmModelPricesDbWithPool(pool);
 }
@@ -378,6 +438,7 @@ export class ProcessLogService implements IProcessLogService {
         entry.error === undefined
           ? undefined
           : sanitizeForProcessLog(entry.error, this.config.max_payload_chars),
+      llm: entry.llm,
     };
 
     this.logger.info(
@@ -400,6 +461,7 @@ export class ProcessLogService implements IProcessLogService {
         durationMs: row.durationMs,
         payload: row.payload,
         error: row.error,
+        llm: row.llm,
       },
       "graph process log",
     );
@@ -467,7 +529,7 @@ export class ProcessLogService implements IProcessLogService {
     try {
       await this.insertRow(row);
     } catch (err) {
-      if (!isMissingRelationError(err)) throw err;
+      if (!isMissingStorageError(err)) throw err;
       await this.ensureStorage();
       await this.insertRow(row);
     }
@@ -489,12 +551,22 @@ export class ProcessLogService implements IProcessLogService {
       `INSERT INTO graph_process_logs (
          trace_id, seq, created_at, chat_id, request_id, tenant_id, message_id,
          user_id, provider, event, stage, workflow, node, tool, status,
-         duration_ms, payload, error
+         duration_ms, payload, error,
+         llm_provider, llm_model, llm_model_key, llm_model_size,
+         llm_input_tokens, llm_cached_input_tokens, llm_cache_write_tokens,
+         llm_output_tokens, llm_total_tokens, llm_cost_estimated,
+         llm_cost_currency, llm_cost_status, llm_price_id,
+         llm_processing_tier, llm_context_tier
        )
        VALUES (
          $1, $2, $3, $4, $5, $6, $7,
          $8, $9, $10, $11, $12, $13, $14, $15,
-         $16, $17::jsonb, $18::jsonb
+         $16, $17::jsonb, $18::jsonb,
+         $19, $20, $21, $22,
+         $23, $24, $25,
+         $26, $27, $28,
+         $29, $30, $31,
+         $32, $33
        )`,
       [
         row.traceId,
@@ -515,6 +587,21 @@ export class ProcessLogService implements IProcessLogService {
         row.durationMs,
         row.payload === undefined ? null : JSON.stringify(row.payload),
         row.error === undefined ? null : JSON.stringify(row.error),
+        row.llm?.provider ?? null,
+        row.llm?.model ?? null,
+        row.llm?.modelKey ?? null,
+        row.llm?.modelSize ?? null,
+        row.llm?.inputTokens ?? null,
+        row.llm?.cachedInputTokens ?? null,
+        row.llm?.cacheWriteTokens ?? null,
+        row.llm?.outputTokens ?? null,
+        row.llm?.totalTokens ?? null,
+        row.llm?.costEstimated ?? null,
+        row.llm?.costCurrency ?? null,
+        row.llm?.costStatus ?? null,
+        row.llm?.priceId ?? null,
+        row.llm?.processingTier ?? null,
+        row.llm?.contextTier ?? null,
       ],
     );
   }

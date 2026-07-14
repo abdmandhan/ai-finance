@@ -76,6 +76,7 @@ export {
   LLM_MODEL_PRICES_SEED_DML,
   LLM_MODEL_PRICES_TABLE_DDL,
   PROCESS_LOG_INDEX_DDL,
+  PROCESS_LOG_LLM_COLUMNS_DDL,
   PROCESS_LOG_TABLE_DDL,
   sanitizeForProcessLog,
   setupLlmModelPricesDbWithPool,
@@ -83,6 +84,7 @@ export {
   type IProcessLogService,
   type ProcessLogContext,
   type ProcessLogEntry,
+  type ProcessLogLlmMetrics,
   type ProcessLogPool,
   type ProcessLogPoolFactory,
 } from "./process-log.service";

@@ -69,6 +69,14 @@ function makePricing() {
   };
 }
 
+function makeMissingPricePricing() {
+  return {
+    lookup: vi.fn(),
+    close: vi.fn(),
+    estimateCost: vi.fn(async () => ({ status: "missing_price" })),
+  };
+}
+
 beforeEach(() => {
   initChatModel.mockReset();
   createAgent.mockReset();
@@ -302,6 +310,23 @@ describe("LlmService.extract / chat", () => {
     expect(processLog.log).toHaveBeenCalledWith(
       expect.objectContaining({
         stage: "llm.chat.end",
+        llm: {
+          provider: "openai",
+          model: "gpt-5.4-mini",
+          modelKey: "openai:gpt-5.4-mini",
+          modelSize: "large",
+          inputTokens: 1_000,
+          cachedInputTokens: 200,
+          cacheWriteTokens: undefined,
+          outputTokens: 100,
+          totalTokens: 1_100,
+          costEstimated: 0.001065,
+          costCurrency: "USD",
+          priceId: "42",
+          processingTier: "standard",
+          contextTier: "short",
+          costStatus: "estimated",
+        },
         payload: expect.objectContaining({
           modelSize: "large",
           provider: "openai",
@@ -317,6 +342,50 @@ describe("LlmService.extract / chat", () => {
             estimated: 0.001065,
             priceId: "42",
           }),
+        }),
+      }),
+    );
+  });
+
+  it("logs missing-price status in typed LLM metrics", async () => {
+    const response = Object.assign(new AIMessage("unpriced reply"), {
+      usage_metadata: {
+        input_tokens: 10,
+        output_tokens: 2,
+        total_tokens: 12,
+      },
+    });
+    initChatModel.mockImplementation(async () => ({
+      invoke: vi.fn(async () => response),
+      bindTools: vi.fn(),
+    }));
+    const processLog = makeProcessLog();
+    const pricing = makeMissingPricePricing();
+    const service = new LlmService(
+      makeLlmConfig({
+        large: { url: "", api_key: "", model: "openai:unknown-model" },
+      }),
+      logger,
+      processLog as never,
+      pricing as never,
+    );
+
+    await service.chat([new HumanMessage("hi")]);
+
+    expect(processLog.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: "llm.chat.end",
+        llm: expect.objectContaining({
+          provider: "openai",
+          model: "unknown-model",
+          modelSize: "large",
+          inputTokens: 10,
+          outputTokens: 2,
+          totalTokens: 12,
+          costStatus: "missing_price",
+        }),
+        payload: expect.objectContaining({
+          cost: { status: "missing_price" },
         }),
       }),
     );
@@ -381,6 +450,23 @@ describe("LlmService process-log usage", () => {
     expect(processLog.log).toHaveBeenCalledWith(
       expect.objectContaining({
         stage: "llm.invoke.end",
+        llm: {
+          provider: "openai",
+          model: "gpt-5.4-mini",
+          modelKey: "openai:gpt-5.4-mini",
+          modelSize: "medium",
+          inputTokens: 1_000,
+          cachedInputTokens: 200,
+          cacheWriteTokens: undefined,
+          outputTokens: 100,
+          totalTokens: 1_100,
+          costEstimated: 0.001065,
+          costCurrency: "USD",
+          priceId: "42",
+          processingTier: "standard",
+          contextTier: "short",
+          costStatus: "estimated",
+        },
         payload: expect.objectContaining({
           modelSize: "medium",
           provider: "openai",

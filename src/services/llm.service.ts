@@ -14,8 +14,15 @@ import {
 } from "langchain";
 import { initChatModel } from "langchain/chat_models/universal";
 import type { z } from "zod";
-import type { ILlmPricingService, LlmUsage } from "./llm-pricing.service";
-import type { IProcessLogService } from "./process-log.service";
+import type {
+  ILlmPricingService,
+  LlmCostEstimate,
+  LlmUsage,
+} from "./llm-pricing.service";
+import type {
+  IProcessLogService,
+  ProcessLogLlmMetrics,
+} from "./process-log.service";
 
 export type ModelSize = "small" | "medium" | "large";
 
@@ -216,6 +223,7 @@ export class LlmService implements ILlmService {
           options,
         );
         const usage = usageFromMessages(retry.messages);
+        const cost = await this.estimateCost(modelConfig, usage);
         this.processLog?.log({
           event: "assistant.model_call",
           stage: "llm.invoke.end",
@@ -228,10 +236,11 @@ export class LlmService implements ILlmService {
             model: modelConfig.modelName,
             modelKey: modelConfig.model,
             usage,
-            cost: await this.estimateCost(modelConfig, usage),
+            cost,
             structuredResponse: retry.structuredResponse,
             lastMessage: describeMessage(retry.lastMessage),
           },
+          llm: buildLlmMetrics(modelConfig, modelSize, usage, cost),
         });
         return retry;
       } else {
@@ -294,6 +303,7 @@ export class LlmService implements ILlmService {
       usageFromMessages(result.messages),
       fallbackUsage,
     ]);
+    const cost = await this.estimateCost(modelConfig, usage);
     const out = {
       messages: result.messages,
       structuredResponse,
@@ -311,11 +321,12 @@ export class LlmService implements ILlmService {
         model: modelConfig.modelName,
         modelKey: modelConfig.model,
         usage,
-        cost: await this.estimateCost(modelConfig, usage),
+        cost,
         structuredResponse,
         lastMessage: describeMessage(lastAiMessage),
         messageCount: result.messages.length,
       },
+      llm: buildLlmMetrics(modelConfig, modelSize, usage, cost),
     });
     return out;
   }
@@ -367,6 +378,7 @@ export class LlmService implements ILlmService {
     try {
       const response = (await runnable.invoke(finalMessages)) as AIMessage;
       const usage = usageFromMessage(response);
+      const cost = await this.estimateCost(modelConfig, usage);
       this.processLog?.log({
         event: "assistant.model_call",
         stage: "llm.chat.end",
@@ -379,9 +391,10 @@ export class LlmService implements ILlmService {
           model: modelConfig.modelName,
           modelKey: modelConfig.model,
           usage,
-          cost: await this.estimateCost(modelConfig, usage),
+          cost,
           response: describeMessage(response),
         },
+        llm: buildLlmMetrics(modelConfig, size, usage, cost),
       });
       return response;
     } catch (error) {
@@ -438,13 +451,45 @@ export class LlmService implements ILlmService {
   private async estimateCost(
     modelConfig: ResolvedModelConfig,
     usage: LlmUsage | undefined,
-  ): Promise<unknown> {
+  ): Promise<LlmCostEstimate | { status: "missing_price" } | undefined> {
     return this.pricing?.estimateCost({
       provider: modelConfig.provider,
       model: modelConfig.modelName,
       usage,
     });
   }
+}
+
+function buildLlmMetrics(
+  modelConfig: ResolvedModelConfig,
+  modelSize: ModelSize,
+  usage: LlmUsage | undefined,
+  cost: LlmCostEstimate | { status: "missing_price" } | undefined,
+): ProcessLogLlmMetrics | undefined {
+  if (!usage) return undefined;
+  const metrics: ProcessLogLlmMetrics = {
+    provider: modelConfig.provider,
+    model: modelConfig.modelName,
+    modelKey: modelConfig.model,
+    modelSize,
+    inputTokens: usage.inputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
+    cacheWriteTokens: usage.cacheWriteTokens,
+    outputTokens: usage.outputTokens,
+    totalTokens: usage.totalTokens,
+  };
+  if (!cost) return metrics;
+  if ("status" in cost) {
+    metrics.costStatus = cost.status;
+    return metrics;
+  }
+  metrics.costEstimated = cost.estimated;
+  metrics.costCurrency = cost.currency;
+  metrics.priceId = cost.priceId;
+  metrics.processingTier = cost.processingTier;
+  metrics.contextTier = cost.contextTier;
+  metrics.costStatus = "estimated";
+  return metrics;
 }
 
 /**
