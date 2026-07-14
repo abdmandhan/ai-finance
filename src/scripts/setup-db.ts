@@ -15,5 +15,5 @@ await checkpointerUtils.setupCheckpointer(checkpointer);
 await createPreferencesTool(config.database.url, logger).setup();
 await setupProcessLogDb(config.database.url, logger);
 
-logger.info("Checkpointer + preferences + process log tables ready");
+logger.info("Checkpointer + preferences + process log/pricing tables ready");
 process.exit(0);

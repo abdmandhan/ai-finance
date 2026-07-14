@@ -57,7 +57,10 @@ interface ProcessLogRow extends StoredProcessLogContext {
 }
 
 export interface ProcessLogPool {
-  query(sql: string, params?: unknown[]): Promise<{ rowCount?: number | null }>;
+  query<T = unknown>(
+    sql: string,
+    params?: unknown[],
+  ): Promise<{ rowCount?: number | null; rows?: T[] }>;
   end(): Promise<void>;
 }
 
@@ -101,6 +104,109 @@ export const PROCESS_LOG_INDEX_DDL = [
   `CREATE INDEX IF NOT EXISTS graph_process_logs_created_idx
      ON graph_process_logs (created_at)`,
 ];
+
+export const LLM_MODEL_PRICES_TABLE_DDL = `
+CREATE TABLE IF NOT EXISTS llm_model_prices (
+  id                         bigserial PRIMARY KEY,
+  provider                   text NOT NULL,
+  model                      text NOT NULL,
+  processing_tier            text NOT NULL,
+  context_tier               text NOT NULL,
+  currency                   text NOT NULL DEFAULT 'USD',
+  input_per_million          numeric(12, 6) NOT NULL,
+  cached_input_per_million   numeric(12, 6),
+  cache_write_per_million    numeric(12, 6),
+  output_per_million         numeric(12, 6) NOT NULL,
+  effective_from             timestamptz NOT NULL DEFAULT now(),
+  effective_to               timestamptz,
+  source_url                 text,
+  created_at                 timestamptz NOT NULL DEFAULT now(),
+  updated_at                 timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT llm_model_prices_effective_range
+    CHECK (effective_to IS NULL OR effective_to > effective_from),
+  CONSTRAINT llm_model_prices_unique_effective
+    UNIQUE (provider, model, processing_tier, context_tier, effective_from)
+)`;
+
+export const LLM_MODEL_PRICES_INDEX_DDL = [
+  `CREATE INDEX IF NOT EXISTS llm_model_prices_lookup_idx
+     ON llm_model_prices (
+       provider, model, processing_tier, context_tier, effective_from DESC
+     )`,
+];
+
+const OPENAI_PRICING_SOURCE_URL = "https://developers.openai.com/api/docs/pricing";
+
+export const LLM_MODEL_PRICES_SEED_DML = [
+  seedLlmModelPriceSql({
+    provider: "openai",
+    model: "gpt-5.4-mini",
+    processingTier: "standard",
+    contextTier: "short",
+    inputPerMillion: 0.75,
+    cachedInputPerMillion: 0.075,
+    outputPerMillion: 4.5,
+  }),
+  seedLlmModelPriceSql({
+    provider: "openai",
+    model: "gpt-5.4-mini",
+    processingTier: "batch",
+    contextTier: "short",
+    inputPerMillion: 0.375,
+    cachedInputPerMillion: 0.0375,
+    outputPerMillion: 2.25,
+  }),
+  seedLlmModelPriceSql({
+    provider: "openai",
+    model: "gpt-5.4-mini",
+    processingTier: "flex",
+    contextTier: "short",
+    inputPerMillion: 0.375,
+    cachedInputPerMillion: 0.0375,
+    outputPerMillion: 2.25,
+  }),
+  seedLlmModelPriceSql({
+    provider: "openai",
+    model: "gpt-5.4-mini",
+    processingTier: "priority",
+    contextTier: "short",
+    inputPerMillion: 1.5,
+    cachedInputPerMillion: 0.15,
+    outputPerMillion: 9,
+  }),
+];
+
+function seedLlmModelPriceSql(input: {
+  provider: string;
+  model: string;
+  processingTier: string;
+  contextTier: string;
+  inputPerMillion: number;
+  cachedInputPerMillion: number;
+  outputPerMillion: number;
+}): string {
+  return `
+INSERT INTO llm_model_prices (
+  provider, model, processing_tier, context_tier, currency,
+  input_per_million, cached_input_per_million, cache_write_per_million,
+  output_per_million, effective_from, source_url
+)
+VALUES (
+  '${input.provider}', '${input.model}', '${input.processingTier}',
+  '${input.contextTier}', 'USD', ${input.inputPerMillion},
+  ${input.cachedInputPerMillion}, NULL, ${input.outputPerMillion},
+  '2026-07-14T00:00:00Z', '${OPENAI_PRICING_SOURCE_URL}'
+)
+ON CONFLICT (provider, model, processing_tier, context_tier, effective_from)
+DO UPDATE SET
+  currency = EXCLUDED.currency,
+  input_per_million = EXCLUDED.input_per_million,
+  cached_input_per_million = EXCLUDED.cached_input_per_million,
+  cache_write_per_million = EXCLUDED.cache_write_per_million,
+  output_per_million = EXCLUDED.output_per_million,
+  source_url = EXCLUDED.source_url,
+  updated_at = now()`;
+}
 
 function defaultPoolFactory(databaseUrl: string): ProcessLogPool {
   return new Pool({ connectionString: databaseUrl });
@@ -180,6 +286,15 @@ export function sanitizeForProcessLog(
 async function setupProcessLogDbWithPool(pool: ProcessLogPool): Promise<void> {
   await pool.query(PROCESS_LOG_TABLE_DDL);
   for (const sql of PROCESS_LOG_INDEX_DDL) await pool.query(sql);
+  await setupLlmModelPricesDbWithPool(pool);
+}
+
+export async function setupLlmModelPricesDbWithPool(
+  pool: ProcessLogPool,
+): Promise<void> {
+  await pool.query(LLM_MODEL_PRICES_TABLE_DDL);
+  for (const sql of LLM_MODEL_PRICES_INDEX_DDL) await pool.query(sql);
+  for (const sql of LLM_MODEL_PRICES_SEED_DML) await pool.query(sql);
 }
 
 export async function setupProcessLogDb(

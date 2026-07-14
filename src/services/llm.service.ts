@@ -14,6 +14,7 @@ import {
 } from "langchain";
 import { initChatModel } from "langchain/chat_models/universal";
 import type { z } from "zod";
+import type { ILlmPricingService, LlmUsage } from "./llm-pricing.service";
 import type { IProcessLogService } from "./process-log.service";
 
 export type ModelSize = "small" | "medium" | "large";
@@ -66,6 +67,8 @@ interface ResolvedModelConfig {
   url: string;
   apiKey: string;
   model: string;
+  provider: string;
+  modelName: string;
 }
 
 function resolveModelConfig(
@@ -73,10 +76,14 @@ function resolveModelConfig(
   size: ModelSize,
 ): ResolvedModelConfig {
   const variant = llm[size];
+  const [provider, ...rest] = variant.model.split(":");
+  const modelName = rest.join(":");
   return {
     url: variant.url || llm.url,
     apiKey: variant.api_key || llm.api_key || "no-key",
     model: variant.model,
+    provider,
+    modelName,
   };
 }
 
@@ -84,12 +91,14 @@ type UniversalModel = Awaited<ReturnType<typeof initChatModel>>;
 
 export class LlmService implements ILlmService {
   private models: Partial<Record<ModelSize, UniversalModel>> = {};
+  private modelConfigs: Partial<Record<ModelSize, ResolvedModelConfig>> = {};
   private initialized = false;
 
   constructor(
     private readonly config: Config["llm"],
     private readonly logger: ILogger,
     private readonly processLog?: IProcessLogService,
+    private readonly pricing?: ILlmPricingService,
   ) {
     this.logger = logger.child({ service: "LlmService" });
   }
@@ -98,16 +107,15 @@ export class LlmService implements ILlmService {
     if (this.initialized) return;
 
     const initOne = (size: ModelSize) => {
-      const { url, apiKey, model } = resolveModelConfig(this.config, size);
-      const [provider, ...rest] = model.split(":");
-      const modelName = rest.join(":");
-      return initChatModel(modelName, {
-        apiKey,
-        modelProvider: provider,
+      const resolved = resolveModelConfig(this.config, size);
+      this.modelConfigs[size] = resolved;
+      return initChatModel(resolved.modelName, {
+        apiKey: resolved.apiKey,
+        modelProvider: resolved.provider,
         // baseURL is OpenAI-compatible only; hosted providers reject it.
-        ...(url ? { configuration: { baseURL: url } } : {}),
+        ...(resolved.url ? { configuration: { baseURL: resolved.url } } : {}),
         // Some GPT-5 reasoning models only accept the default temperature.
-        ...(provider === "openai" ? {} : { temperature: 0.1 }),
+        ...(resolved.provider === "openai" ? {} : { temperature: 0.1 }),
       });
     };
 
@@ -129,6 +137,7 @@ export class LlmService implements ILlmService {
     await this.ensureInitialized();
 
     const model = this.models[modelSize];
+    const modelConfig = this.modelConfigs[modelSize]!;
     if (!model) {
       throw new Error(`Unknown model size: ${modelSize}`);
     }
@@ -151,6 +160,9 @@ export class LlmService implements ILlmService {
       tool: "llm.invoke",
       payload: {
         modelSize,
+        provider: modelConfig.provider,
+        model: modelConfig.modelName,
+        modelKey: modelConfig.model,
         messageCount: finalMessages.length,
         toolNames: options?.tools?.map((t) => t.name) ?? [],
         responseFormat: Boolean(options?.responseFormat),
@@ -174,6 +186,12 @@ export class LlmService implements ILlmService {
           tool: "llm.invoke",
           status: "type_error",
           durationMs: Date.now() - started,
+          payload: {
+            modelSize,
+            provider: modelConfig.provider,
+            model: modelConfig.modelName,
+            modelKey: modelConfig.model,
+          },
           error: err,
         });
         return {
@@ -197,6 +215,7 @@ export class LlmService implements ILlmService {
           finalMessages,
           options,
         );
+        const usage = usageFromMessages(retry.messages);
         this.processLog?.log({
           event: "assistant.model_call",
           stage: "llm.invoke.end",
@@ -204,6 +223,12 @@ export class LlmService implements ILlmService {
           status: retry.structuredResponse ? "ok" : "no_structured_response",
           durationMs: Date.now() - started,
           payload: {
+            modelSize,
+            provider: modelConfig.provider,
+            model: modelConfig.modelName,
+            modelKey: modelConfig.model,
+            usage,
+            cost: await this.estimateCost(modelConfig, usage),
             structuredResponse: retry.structuredResponse,
             lastMessage: describeMessage(retry.lastMessage),
           },
@@ -217,6 +242,12 @@ export class LlmService implements ILlmService {
           tool: "llm.invoke",
           status: "error",
           durationMs: Date.now() - started,
+          payload: {
+            modelSize,
+            provider: modelConfig.provider,
+            model: modelConfig.modelName,
+            modelKey: modelConfig.model,
+          },
           error: err,
         });
         throw err;
@@ -233,11 +264,11 @@ export class LlmService implements ILlmService {
 
     // Fallback: retry agent with toolStrategy, which forces structured output
     // via a synthetic tool call
+    let fallbackUsage: LlmUsage | undefined;
     if (!structuredResponse && options?.responseFormat) {
       try {
         const toolAgent = createAgent({
           model,
-           
           responseFormat: toolStrategy(options.responseFormat) as any,
         });
         const toolResult = await toolAgent.invoke({
@@ -250,12 +281,19 @@ export class LlmService implements ILlmService {
           toolResult.structuredResponse as AgentResult<Schema>["structuredResponse"];
         if (structuredResponse) {
           lastAiMessage = toolLastMsg;
+          fallbackUsage = usageFromMessages(
+            toolResult.messages.slice(result.messages.length),
+          );
         }
       } catch {
         // toolStrategy fallback failed; structuredResponse stays undefined
       }
     }
 
+    const usage = sumUsages([
+      usageFromMessages(result.messages),
+      fallbackUsage,
+    ]);
     const out = {
       messages: result.messages,
       structuredResponse,
@@ -268,6 +306,12 @@ export class LlmService implements ILlmService {
       status: structuredResponse ? "ok" : "no_structured_response",
       durationMs: Date.now() - started,
       payload: {
+        modelSize,
+        provider: modelConfig.provider,
+        model: modelConfig.modelName,
+        modelKey: modelConfig.model,
+        usage,
+        cost: await this.estimateCost(modelConfig, usage),
         structuredResponse,
         lastMessage: describeMessage(lastAiMessage),
         messageCount: result.messages.length,
@@ -300,6 +344,7 @@ export class LlmService implements ILlmService {
     await this.ensureInitialized();
     const size = options?.size ?? "large";
     const model = this.models[size]!;
+    const modelConfig = this.modelConfigs[size]!;
     const finalMessages = mergeSystemMessages(messages);
     const runnable = options?.tools?.length
       ? model.bindTools(options.tools)
@@ -311,6 +356,9 @@ export class LlmService implements ILlmService {
       tool: "llm.chat",
       payload: {
         modelSize: size,
+        provider: modelConfig.provider,
+        model: modelConfig.modelName,
+        modelKey: modelConfig.model,
         messageCount: finalMessages.length,
         toolNames: options?.tools?.map((t) => t.name) ?? [],
         messages: describeMessages(finalMessages),
@@ -318,13 +366,22 @@ export class LlmService implements ILlmService {
     });
     try {
       const response = (await runnable.invoke(finalMessages)) as AIMessage;
+      const usage = usageFromMessage(response);
       this.processLog?.log({
         event: "assistant.model_call",
         stage: "llm.chat.end",
         tool: "llm.chat",
         status: "ok",
         durationMs: Date.now() - started,
-        payload: { response: describeMessage(response) },
+        payload: {
+          modelSize: size,
+          provider: modelConfig.provider,
+          model: modelConfig.modelName,
+          modelKey: modelConfig.model,
+          usage,
+          cost: await this.estimateCost(modelConfig, usage),
+          response: describeMessage(response),
+        },
       });
       return response;
     } catch (error) {
@@ -334,6 +391,12 @@ export class LlmService implements ILlmService {
         tool: "llm.chat",
         status: "error",
         durationMs: Date.now() - started,
+        payload: {
+          modelSize: size,
+          provider: modelConfig.provider,
+          model: modelConfig.modelName,
+          modelKey: modelConfig.model,
+        },
         error,
       });
       throw error;
@@ -350,7 +413,6 @@ export class LlmService implements ILlmService {
     try {
       const toolAgent = createAgent({
         model,
-         
         responseFormat: toolStrategy(options!.responseFormat!) as any,
       });
       const toolResult = await toolAgent.invoke({ messages });
@@ -371,6 +433,17 @@ export class LlmService implements ILlmService {
         lastMessage: messages[messages.length - 1] as AIMessage,
       };
     }
+  }
+
+  private async estimateCost(
+    modelConfig: ResolvedModelConfig,
+    usage: LlmUsage | undefined,
+  ): Promise<unknown> {
+    return this.pricing?.estimateCost({
+      provider: modelConfig.provider,
+      model: modelConfig.modelName,
+      usage,
+    });
   }
 }
 
@@ -410,10 +483,116 @@ function describeMessages(messages: BaseMessage[]): unknown[] {
   return messages.map((message) => describeMessage(message));
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function num(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function nestedNum(
+  value: unknown,
+  ...path: string[]
+): number | undefined {
+  let current: unknown = value;
+  for (const key of path) {
+    if (!isRecord(current)) return undefined;
+    current = current[key];
+  }
+  return num(current);
+}
+
+export function usageFromMessage(message: BaseMessage): LlmUsage | undefined {
+  if (!(message instanceof AIMessage)) return undefined;
+  const candidate = message as unknown as {
+    usage_metadata?: unknown;
+    response_metadata?: unknown;
+  };
+  const usageMetadata = candidate.usage_metadata;
+  const responseMetadata = candidate.response_metadata;
+  const tokenUsage = isRecord(responseMetadata)
+    ? responseMetadata.tokenUsage
+    : undefined;
+  const responseUsage = isRecord(responseMetadata)
+    ? responseMetadata.usage
+    : undefined;
+
+  const inputTokens =
+    nestedNum(usageMetadata, "input_tokens") ??
+    nestedNum(usageMetadata, "inputTokens") ??
+    nestedNum(tokenUsage, "promptTokens") ??
+    nestedNum(tokenUsage, "prompt_tokens") ??
+    nestedNum(responseUsage, "prompt_tokens") ??
+    nestedNum(responseUsage, "input_tokens");
+  const outputTokens =
+    nestedNum(usageMetadata, "output_tokens") ??
+    nestedNum(usageMetadata, "outputTokens") ??
+    nestedNum(tokenUsage, "completionTokens") ??
+    nestedNum(tokenUsage, "completion_tokens") ??
+    nestedNum(responseUsage, "completion_tokens") ??
+    nestedNum(responseUsage, "output_tokens");
+  const totalTokens =
+    nestedNum(usageMetadata, "total_tokens") ??
+    nestedNum(usageMetadata, "totalTokens") ??
+    nestedNum(tokenUsage, "totalTokens") ??
+    nestedNum(tokenUsage, "total_tokens") ??
+    nestedNum(responseUsage, "total_tokens");
+  const cachedInputTokens =
+    nestedNum(usageMetadata, "input_token_details", "cache_read") ??
+    nestedNum(usageMetadata, "input_token_details", "cached_tokens") ??
+    nestedNum(usageMetadata, "inputTokenDetails", "cacheRead") ??
+    nestedNum(responseUsage, "prompt_tokens_details", "cached_tokens");
+  const cacheWriteTokens =
+    nestedNum(usageMetadata, "input_token_details", "cache_creation") ??
+    nestedNum(usageMetadata, "inputTokenDetails", "cacheCreation");
+
+  const usage: LlmUsage = {
+    inputTokens,
+    cachedInputTokens,
+    cacheWriteTokens,
+    outputTokens,
+    totalTokens,
+  };
+  return Object.values(usage).some((value) => value !== undefined)
+    ? usage
+    : undefined;
+}
+
+function usageFromMessages(messages: BaseMessage[]): LlmUsage | undefined {
+  return sumUsages(messages.map((message) => usageFromMessage(message)));
+}
+
+function sumUsages(usages: (LlmUsage | undefined)[]): LlmUsage | undefined {
+  const out: LlmUsage = {};
+  for (const usage of usages) {
+    if (!usage) continue;
+    out.inputTokens = add(out.inputTokens, usage.inputTokens);
+    out.cachedInputTokens = add(
+      out.cachedInputTokens,
+      usage.cachedInputTokens,
+    );
+    out.cacheWriteTokens = add(out.cacheWriteTokens, usage.cacheWriteTokens);
+    out.outputTokens = add(out.outputTokens, usage.outputTokens);
+    out.totalTokens = add(out.totalTokens, usage.totalTokens);
+  }
+  return Object.values(out).some((value) => value !== undefined)
+    ? out
+    : undefined;
+}
+
+function add(a: number | undefined, b: number | undefined): number | undefined {
+  if (b === undefined) return a;
+  return (a ?? 0) + b;
+}
+
 export function createLlmService(
   config: Config["llm"],
   logger: ILogger,
   processLog?: IProcessLogService,
+  pricing?: ILlmPricingService,
 ): ILlmService {
-  return new LlmService(config, logger, processLog);
+  return new LlmService(config, logger, processLog, pricing);
 }

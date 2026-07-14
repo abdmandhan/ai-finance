@@ -30,7 +30,7 @@ vi.mock("langchain", () => ({
   },
 }));
 
-import { createLlmService, LlmService } from "./llm.service";
+import { createLlmService, LlmService, usageFromMessage } from "./llm.service";
 
 const logger = pino({ level: "silent" });
 const schema = z.object({ answer: z.string() });
@@ -46,6 +46,26 @@ function makeModel() {
     bindTools: vi.fn(function (this: unknown) {
       return { invoke: vi.fn(async () => new AIMessage("tool reply")) };
     }),
+  };
+}
+
+function makeProcessLog() {
+  return {
+    log: vi.fn(),
+  };
+}
+
+function makePricing() {
+  return {
+    lookup: vi.fn(),
+    close: vi.fn(),
+    estimateCost: vi.fn(async () => ({
+      estimated: 0.001065,
+      currency: "USD",
+      priceId: "42",
+      processingTier: "standard",
+      contextTier: "short",
+    })),
   };
 }
 
@@ -240,5 +260,144 @@ describe("LlmService.extract / chat", () => {
     );
 
     expect(reply.content).toBe("tool reply");
+  });
+
+  it("logs chat token usage and estimated cost", async () => {
+    const response = Object.assign(new AIMessage("priced reply"), {
+      usage_metadata: {
+        input_tokens: 1_000,
+        output_tokens: 100,
+        total_tokens: 1_100,
+        input_token_details: { cache_read: 200 },
+      },
+    });
+    initChatModel.mockImplementation(async () => ({
+      invoke: vi.fn(async () => response),
+      bindTools: vi.fn(),
+    }));
+    const processLog = makeProcessLog();
+    const pricing = makePricing();
+    const service = new LlmService(
+      makeLlmConfig({
+        large: { url: "", api_key: "", model: "openai:gpt-5.4-mini" },
+      }),
+      logger,
+      processLog as never,
+      pricing as never,
+    );
+
+    await service.chat([new HumanMessage("hi")]);
+
+    expect(pricing.estimateCost).toHaveBeenCalledWith({
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      usage: {
+        inputTokens: 1_000,
+        cachedInputTokens: 200,
+        cacheWriteTokens: undefined,
+        outputTokens: 100,
+        totalTokens: 1_100,
+      },
+    });
+    expect(processLog.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: "llm.chat.end",
+        payload: expect.objectContaining({
+          modelSize: "large",
+          provider: "openai",
+          model: "gpt-5.4-mini",
+          usage: {
+            inputTokens: 1_000,
+            cachedInputTokens: 200,
+            cacheWriteTokens: undefined,
+            outputTokens: 100,
+            totalTokens: 1_100,
+          },
+          cost: expect.objectContaining({
+            estimated: 0.001065,
+            priceId: "42",
+          }),
+        }),
+      }),
+    );
+  });
+});
+
+describe("LLM usage metadata extraction", () => {
+  it("extracts OpenAI-style response metadata", () => {
+    const message = Object.assign(new AIMessage("ok"), {
+      response_metadata: {
+        tokenUsage: {
+          promptTokens: 300,
+          completionTokens: 40,
+          totalTokens: 340,
+        },
+      },
+    });
+
+    expect(usageFromMessage(message)).toEqual({
+      inputTokens: 300,
+      cachedInputTokens: undefined,
+      cacheWriteTokens: undefined,
+      outputTokens: 40,
+      totalTokens: 340,
+    });
+  });
+});
+
+describe("LlmService process-log usage", () => {
+  it("logs invoke token usage and estimated cost", async () => {
+    const processLog = makeProcessLog();
+    const pricing = makePricing();
+    const service = new LlmService(
+      makeLlmConfig({
+        medium: { url: "", api_key: "", model: "openai:gpt-5.4-mini" },
+      }),
+      logger,
+      processLog as never,
+      pricing as never,
+    );
+    const response = Object.assign(new AIMessage("done"), {
+      response_metadata: {
+        usage: {
+          prompt_tokens: 1_000,
+          completion_tokens: 100,
+          total_tokens: 1_100,
+          prompt_tokens_details: { cached_tokens: 200 },
+        },
+      },
+    });
+    createAgent.mockReturnValue({
+      invoke: vi.fn(async () => ({
+        messages: [response],
+        structuredResponse: { answer: "42" },
+      })),
+    });
+
+    await service.invoke("medium", [new HumanMessage("q")], {
+      responseFormat: schema,
+    });
+
+    expect(processLog.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: "llm.invoke.end",
+        payload: expect.objectContaining({
+          modelSize: "medium",
+          provider: "openai",
+          model: "gpt-5.4-mini",
+          usage: {
+            inputTokens: 1_000,
+            cachedInputTokens: 200,
+            cacheWriteTokens: undefined,
+            outputTokens: 100,
+            totalTokens: 1_100,
+          },
+          cost: expect.objectContaining({
+            estimated: 0.001065,
+            currency: "USD",
+          }),
+        }),
+      }),
+    );
   });
 });

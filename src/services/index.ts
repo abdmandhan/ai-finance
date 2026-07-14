@@ -7,6 +7,16 @@ export {
   type ModelSize,
 } from "./llm.service";
 export {
+  calculateLlmCost,
+  createLlmPricingService,
+  LlmPricingService,
+  type ILlmPricingService,
+  type LlmCostEstimate,
+  type LlmModelPrice,
+  type LlmPriceLookup,
+  type LlmUsage,
+} from "./llm-pricing.service";
+export {
   createCacheService,
   RedisCacheService,
   type ICacheService,
@@ -62,9 +72,13 @@ export {
 export {
   createProcessLogService,
   ProcessLogService,
+  LLM_MODEL_PRICES_INDEX_DDL,
+  LLM_MODEL_PRICES_SEED_DML,
+  LLM_MODEL_PRICES_TABLE_DDL,
   PROCESS_LOG_INDEX_DDL,
   PROCESS_LOG_TABLE_DDL,
   sanitizeForProcessLog,
+  setupLlmModelPricesDbWithPool,
   setupProcessLogDb,
   type IProcessLogService,
   type ProcessLogContext,

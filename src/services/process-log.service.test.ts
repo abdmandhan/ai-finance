@@ -1,6 +1,9 @@
 import type { ILogger } from "@/commons";
 import { describe, expect, it, vi } from "vitest";
 import {
+  LLM_MODEL_PRICES_INDEX_DDL,
+  LLM_MODEL_PRICES_SEED_DML,
+  LLM_MODEL_PRICES_TABLE_DDL,
   PROCESS_LOG_INDEX_DDL,
   PROCESS_LOG_TABLE_DDL,
   ProcessLogService,
@@ -22,7 +25,9 @@ function logger() {
   };
 }
 
-function pool(query = vi.fn(async () => ({ rowCount: 0 }))) {
+function pool(
+  query: ProcessLogPool["query"] = vi.fn(async () => ({ rowCount: 0 })),
+) {
   return {
     query,
     end: vi.fn(async () => {}),
@@ -99,8 +104,9 @@ describe("ProcessLogService", () => {
     await svc.flush();
 
     expect(query).toHaveBeenCalledOnce();
-    expect(query.mock.calls[0][0]).toContain("INSERT INTO graph_process_logs");
-    expect(query.mock.calls[0][1]).toContain("chat-2");
+    const calls = query.mock.calls as unknown as [string, unknown[]][];
+    expect(calls[0][0]).toContain("INSERT INTO graph_process_logs");
+    expect(calls[0][1]).toContain("chat-2");
   });
 
   it("creates storage and retries once when the process log table is missing", async () => {
@@ -131,6 +137,13 @@ describe("ProcessLogService", () => {
     expect(insertAttempts).toBe(2);
     expect(sqlCalls).toContain(PROCESS_LOG_TABLE_DDL);
     for (const sql of PROCESS_LOG_INDEX_DDL) {
+      expect(sqlCalls).toContain(sql);
+    }
+    expect(sqlCalls).toContain(LLM_MODEL_PRICES_TABLE_DDL);
+    for (const sql of LLM_MODEL_PRICES_INDEX_DDL) {
+      expect(sqlCalls).toContain(sql);
+    }
+    for (const sql of LLM_MODEL_PRICES_SEED_DML) {
       expect(sqlCalls).toContain(sql);
     }
     expect(log.error).not.toHaveBeenCalledWith(
@@ -203,11 +216,26 @@ describe("ProcessLogService", () => {
 
     await setupProcessLogDb("postgres://db", log, () => p);
 
-    expect(p.query).toHaveBeenCalledTimes(1 + PROCESS_LOG_INDEX_DDL.length);
+    expect(p.query).toHaveBeenCalledTimes(
+      1 +
+        PROCESS_LOG_INDEX_DDL.length +
+        1 +
+        LLM_MODEL_PRICES_INDEX_DDL.length +
+        LLM_MODEL_PRICES_SEED_DML.length,
+    );
     expect(p.query).toHaveBeenCalledWith(PROCESS_LOG_TABLE_DDL);
     for (const sql of PROCESS_LOG_INDEX_DDL) {
       expect(p.query).toHaveBeenCalledWith(sql);
       expect(sql).toContain("IF NOT EXISTS");
+    }
+    expect(p.query).toHaveBeenCalledWith(LLM_MODEL_PRICES_TABLE_DDL);
+    for (const sql of LLM_MODEL_PRICES_INDEX_DDL) {
+      expect(p.query).toHaveBeenCalledWith(sql);
+      expect(sql).toContain("IF NOT EXISTS");
+    }
+    for (const sql of LLM_MODEL_PRICES_SEED_DML) {
+      expect(p.query).toHaveBeenCalledWith(sql);
+      expect(sql).toContain("ON CONFLICT");
     }
     expect(p.end).toHaveBeenCalledOnce();
   });

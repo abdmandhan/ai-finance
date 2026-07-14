@@ -20,6 +20,7 @@ import {
   createFetchAttachment,
   createKafkaService,
   createLlmService,
+  createLlmPricingService,
   createPausedWorkflowCheck,
   createProcessLogService,
   createQueueService,
@@ -45,10 +46,16 @@ async function main(): Promise<void> {
   const logger = loggerUtils.createLogger(config.log);
   const processLog = createProcessLogService(config, logger);
   const stopProcessLogRetention = processLog.startRetention();
+  const llmPricing = createLlmPricingService(config.database.url, logger);
 
   const kafka = createKafkaService(config, logger);
   const audit = createAuditService(logger);
-  const llmService = createLlmService(config.llm, logger, processLog);
+  const llmService = createLlmService(
+    config.llm,
+    logger,
+    processLog,
+    llmPricing,
+  );
   const resolveEnablement = createResolveEnablement(
     config.agents.enablement_endpoint_base_url,
     logger,
@@ -258,6 +265,7 @@ async function main(): Promise<void> {
     }
     stopProcessLogRetention();
     await processLog.close();
+    await llmPricing.close();
     await cache?.disconnect();
     process.exit(0);
   };
