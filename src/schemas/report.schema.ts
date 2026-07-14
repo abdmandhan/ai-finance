@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { completedApprovalSchema } from "./completed-approval.schema";
 
 /**
  * A read-only financial question. The LLM only names the metric/period/filters;
@@ -74,6 +75,7 @@ export const reportResultSchema = z.object({
   /** Accounting basis of the answer. Xero P&L defaults to accrual. */
   basis: z.string().optional(),
   data: z.unknown().optional(),
+  completedApproval: completedApprovalSchema.optional(),
 });
 export type ReportResult = z.infer<typeof reportResultSchema>;
 

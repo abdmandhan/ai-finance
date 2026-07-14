@@ -1,0 +1,31 @@
+{
+  "requestId": "req-003",
+  "chatId": "chat-003",
+  "messageId": "msg-003",
+  "tenantId": "tenant-001",
+  "provider": "telegram",
+  "content": [
+    {
+      "type": "text",
+      "text": "Recorded a payment of 500 against INV-100. The document is now fully paid."
+    }
+  ],
+  "output": {
+    "answer": "Recorded a payment of 500 against INV-100. The document is now fully paid.",
+    "intent": "call_tool",
+    "agentKey": "invoicing",
+    "approvalData": [
+      {
+        "name": "xero_apply_payment",
+        "provider": "xero",
+        "items": [
+          {
+            "ref": "pay-100",
+            "label": "Recorded a payment of 500 against INV-100. The document is now fully paid.",
+            "status": "completed"
+          }
+        ]
+      }
+    ]
+  }
+}

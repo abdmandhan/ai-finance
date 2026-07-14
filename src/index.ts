@@ -173,6 +173,7 @@ async function main(): Promise<void> {
         pausedWorkflow,
         assistantGraph,
         correlations,
+        publishPolicy: config.assistant.publish_policy,
       })
     : createLegacyHandler({
         kafka,

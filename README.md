@@ -558,6 +558,19 @@ Two layers, both keyed to the catalogue IDs in `../XERO-TEST-CASE-PLAN.md`
   `evals/cases/*.cases.ts`; multimodal receipt cases skip until image fixtures
   are dropped into `evals/fixtures/receipts/`.
 
+### Allure reports
+
+HTML dashboards via [Allure Report](https://allurereport.org/) (Vitest writer + Allure 3 CLI):
+
+```bash
+pnpm test
+pnpm allure:serve   # HTML dashboard for the last unit run
+
+pnpm eval && pnpm allure:eval
+```
+
+Or generate then open separately: `pnpm allure:report` → `pnpm allure:open`.
+
 ---
 
 # Future Roadmap

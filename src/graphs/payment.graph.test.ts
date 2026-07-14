@@ -104,6 +104,7 @@ describe("payment graph — apply payment", () => {
       cfg,
     );
     expect(resumed.result.status).toBe("created");
+    expect(resumed.result.completedApproval?.name).toBe("xero_apply_payment");
     expect(resumed.result.remainingAmountDue).toBe(0);
     expect(xeroTool.createdPayments).toHaveLength(1);
     expect(xeroTool.createdPayments[0]).toMatchObject({
@@ -267,6 +268,9 @@ describe("payment graph — reversal", () => {
       cfg,
     );
     expect(resumed.result.status).toBe("reversed");
+    expect(resumed.result.completedApproval?.name).toBe(
+      "xero_reverse_payment",
+    );
     expect(xeroTool.deletedPayments).toEqual(["pay-1"]);
   });
 
@@ -344,6 +348,9 @@ describe("payment graph — credit notes", () => {
       cfg,
     );
     expect(resumed.result.status).toBe("created");
+    expect(resumed.result.completedApproval?.name).toBe(
+      "xero_create_credit_note",
+    );
     expect(xeroTool.createdCreditNotes).toHaveLength(1);
     expect(xeroTool.createdCreditNotes[0].Type).toBe("ACCRECCREDIT");
     // Allocation capped at the invoice's 500 outstanding, not the 800 credit.
@@ -372,6 +379,7 @@ describe("payment graph — void", () => {
       cfg,
     );
     expect(resumed.result.status).toBe("voided");
+    expect(resumed.result.completedApproval?.name).toBe("xero_void_invoice");
     expect(xeroTool.statusUpdates).toEqual([
       { invoiceId: "i-100", status: "VOIDED" },
     ]);
@@ -397,6 +405,24 @@ describe("payment graph — void", () => {
 });
 
 describe("payment graph — guardrails", () => {
+  it("refund_credit remains unsupported and performs no Xero write", async () => {
+    const { graph, xeroTool } = buildGraph({
+      intents: [intent({ action: "refund_credit" })],
+    });
+
+    const done: any = await graph.invoke(
+      { threadId: "pay-refund-credit", tenantId: "t1", userMessage: "refund the remaining credit" },
+      config("pay-refund-credit"),
+    );
+
+    expect(done.result.status).toBe("failed");
+    expect(done.result.summary).toContain("Refunding remaining credit");
+    expect(xeroTool.createdPayments).toHaveLength(0);
+    expect(xeroTool.deletedPayments).toHaveLength(0);
+    expect(xeroTool.createdCreditNotes).toHaveLength(0);
+    expect(xeroTool.statusUpdates).toHaveLength(0);
+  });
+
   it("unsupported requests fail fast without lookups or writes", async () => {
     const { graph, xeroTool } = buildGraph({
       intents: [intent({ action: "unsupported" })],

@@ -48,6 +48,10 @@ job_timeout_ms = 300000
 # questions directly and calls the strict workflow graphs as tools.
 # false -> rollback to the legacy classify() router (unsupported messages get no reply).
 enabled = true
+# always_publish: graph publishes pure assistant replies and workflow replies.
+# workflow_only: graph suppresses fresh pure-chat replies while still publishing
+# workflow clarifications, approvals, results, paused resumes, and error apologies.
+publish_policy = "always_publish"
 # Cap on prior conversation messages replayed to the model each turn.
 max_history_messages = 30
 

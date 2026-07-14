@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { completedApprovalSchema } from "./completed-approval.schema";
 
 /** A single invoice/bill line (tax-exclusive unit amount). */
 export const invoiceLineSchema = z.object({
@@ -67,6 +68,7 @@ export const invoiceResultSchema = z.object({
   status: z.enum(["created", "rejected", "failed"]),
   invoiceId: z.string().optional(),
   summary: z.string(),
+  completedApproval: completedApprovalSchema.optional(),
 });
 export type InvoiceResult = z.infer<typeof invoiceResultSchema>;
 

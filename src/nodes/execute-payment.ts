@@ -31,28 +31,42 @@ export function makeExecutePaymentNode(deps: PaymentDeps) {
               },
             ]);
             const remaining = (inv?.amountDue ?? 0) - (state.resolvedAmount ?? 0);
+            const resultSummary =
+              `Recorded a payment of ${state.resolvedAmount} against ${inv?.number ?? inv?.id}.` +
+              (remaining > 0
+                ? ` ${remaining} remains outstanding.`
+                : " The document is now fully paid.");
             return {
               result: {
                 status: "created" as const,
                 paymentId: payment?.PaymentID,
                 invoiceId: inv?.id,
                 remainingAmountDue: Math.max(0, remaining),
-                summary:
-                  `Recorded a payment of ${state.resolvedAmount} against ${inv?.number ?? inv?.id}.` +
-                  (remaining > 0
-                    ? ` ${remaining} remains outstanding.`
-                    : " The document is now fully paid."),
+                summary: resultSummary,
+                completedApproval: {
+                  name: "xero_apply_payment",
+                  provider: "xero",
+                  ref: payment?.PaymentID ?? inv!.id,
+                  label: resultSummary,
+                },
               },
             };
           }
           case "reverse_payment": {
             await deps.xeroTool.deletePayment(auth, state.resolvedPaymentId!);
+            const resultSummary = `Reversed the payment of ${state.resolvedAmount} dated ${state.resolvedDate}${inv?.number ? ` against ${inv.number}` : ""}. The balance is open again.`;
             return {
               result: {
                 status: "reversed" as const,
                 paymentId: state.resolvedPaymentId ?? undefined,
                 invoiceId: inv?.id,
-                summary: `Reversed the payment of ${state.resolvedAmount} dated ${state.resolvedDate}${inv?.number ? ` against ${inv.number}` : ""}. The balance is open again.`,
+                summary: resultSummary,
+                completedApproval: {
+                  name: "xero_reverse_payment",
+                  provider: "xero",
+                  ref: state.resolvedPaymentId!,
+                  label: resultSummary,
+                },
               },
             };
           }
@@ -86,27 +100,53 @@ export function makeExecutePaymentNode(deps: PaymentDeps) {
                   Amount: allocated,
                 });
             }
+            const resultSummary =
+              `Created credit note ${note?.CreditNoteNumber ?? ""} of ${state.resolvedAmount} for ${state.contactName}.` +
+              (allocated > 0
+                ? ` Applied ${allocated} to ${alloc?.number ?? alloc?.id}.`
+                : "");
             return {
               result: {
                 status: "created" as const,
                 creditNoteId: note?.CreditNoteID,
                 invoiceId: alloc?.id,
-                summary:
-                  `Created credit note ${note?.CreditNoteNumber ?? ""} of ${state.resolvedAmount} for ${state.contactName}.` +
-                  (allocated > 0
-                    ? ` Applied ${allocated} to ${alloc?.number ?? alloc?.id}.`
-                    : ""),
+                summary: resultSummary,
+                ...(note?.CreditNoteID
+                  ? {
+                      completedApproval: {
+                        name: "xero_create_credit_note",
+                        provider: "xero",
+                        ref: note.CreditNoteID,
+                        label: resultSummary,
+                      },
+                    }
+                  : {}),
               },
             };
           }
-          default: {
-            // void_invoice
+          case "void_invoice": {
             await deps.xeroTool.updateInvoiceStatus(auth, inv!.id, "VOIDED");
+            const resultSummary = `Voided ${inv?.number ?? inv?.id}.`;
             return {
               result: {
                 status: "voided" as const,
                 invoiceId: inv?.id,
-                summary: `Voided ${inv?.number ?? inv?.id}.`,
+                summary: resultSummary,
+                completedApproval: {
+                  name: "xero_void_invoice",
+                  provider: "xero",
+                  ref: inv!.id,
+                  label: resultSummary,
+                },
+              },
+            };
+          }
+          default: {
+            return {
+              result: {
+                status: "failed" as const,
+                invoiceId: inv?.id,
+                summary: `Unsupported payment action: ${state.action ?? "unknown"}. Nothing was recorded in Xero.`,
               },
             };
           }

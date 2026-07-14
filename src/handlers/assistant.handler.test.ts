@@ -26,6 +26,7 @@ function setup(
     enablement?: { scheduling: boolean; invoicing: boolean; expense: boolean };
     graphState?: unknown;
     runOutcome?: unknown;
+    publishPolicy?: "always_publish" | "workflow_only";
   } = {},
 ) {
   const publishOutbound = vi.fn(async (_msg: any) => {});
@@ -55,6 +56,7 @@ function setup(
     pausedWorkflow: vi.fn(async () => opts.paused ?? null),
     assistantGraph,
     correlations: createCorrelationStore(),
+    publishPolicy: opts.publishPolicy,
   });
   return { handler, publishOutbound, runWorkflow, assistantGraph };
 }
@@ -83,6 +85,100 @@ describe("assistant handler", () => {
     expect(out.output.answer).toContain("Accrual accounting");
   });
 
+  it("suppresses fresh pure conversation when publish policy is workflow_only", async () => {
+    const { handler, publishOutbound, runWorkflow, assistantGraph } = setup({
+      publishPolicy: "workflow_only",
+      graphState: {
+        messages: [new AIMessage("Accrual accounting records income when earned.")],
+        outcome: null,
+      },
+    });
+
+    await handler(inbound("What is accrual accounting?"));
+
+    expect(runWorkflow).not.toHaveBeenCalled();
+    expect(assistantGraph.invoke).toHaveBeenCalledOnce();
+    expect(publishOutbound).not.toHaveBeenCalled();
+  });
+
+  it("still publishes a fresh workflow result when publish policy is workflow_only", async () => {
+    const { handler, publishOutbound } = setup({
+      publishPolicy: "workflow_only",
+      graphState: {
+        messages: [new AIMessage("Done — invoice INV-1 is authorised.")],
+        outcome: {
+          kind: "result",
+          workflow: "invoice",
+          result: {
+            status: "created",
+            summary: "INV-1 authorised.",
+            invoiceId: "inv-1",
+            completedApproval: {
+              name: "xero_authorise_invoice",
+              provider: "xero",
+              ref: "inv-1",
+              label: "INV-1 authorised.",
+            },
+          },
+        },
+      },
+    });
+
+    await handler(inbound("authorise invoice"));
+
+    expect(publishOutbound).toHaveBeenCalledOnce();
+    const out = publishOutbound.mock.calls[0][0];
+    expect(out.output.intent).toBe("call_tool");
+    expect(out.output.approvalData?.[0]?.name).toBe("xero_authorise_invoice");
+  });
+
+  it("still publishes a fresh workflow clarification when publish policy is workflow_only", async () => {
+    const { handler, publishOutbound } = setup({
+      publishPolicy: "workflow_only",
+      graphState: {
+        messages: [new AIMessage("Which currency?")],
+        outcome: {
+          kind: "clarification",
+          workflow: "invoice",
+          question: "Which currency?",
+        },
+      },
+    });
+
+    await handler(inbound("make an invoice"));
+
+    expect(publishOutbound).toHaveBeenCalledOnce();
+    expect(publishOutbound.mock.calls[0][0].output.intent).toBe(
+      "needs_clarification",
+    );
+  });
+
+  it("still publishes a fresh workflow approval when publish policy is workflow_only", async () => {
+    const { handler, publishOutbound } = setup({
+      publishPolicy: "workflow_only",
+      graphState: {
+        messages: [new AIMessage("Approve this invoice?")],
+        outcome: {
+          kind: "approval",
+          workflow: "invoice",
+          message: "Approve this invoice?",
+          approval: {
+            name: "xero_authorise_invoice",
+            provider: "xero",
+            items: [{ ref: "inv-1", label: "INV-1" }],
+          },
+        },
+      },
+    });
+
+    await handler(inbound("authorise invoice"));
+
+    expect(publishOutbound).toHaveBeenCalledOnce();
+    const out = publishOutbound.mock.calls[0][0];
+    expect(out.output.intent).toBe("call_tool");
+    expect(out.output.approvalData?.[0]?.items?.[0]?.status).toBe("pending");
+  });
+
   it("forwards the expense enablement flag into the assistant graph", async () => {
     const { handler, assistantGraph } = setup({
       enablement: { scheduling: true, invoicing: false, expense: true },
@@ -102,6 +198,7 @@ describe("assistant handler", () => {
   it("resumes a paused workflow first; a re-interrupt is relayed verbatim", async () => {
     const { handler, publishOutbound, runWorkflow, assistantGraph } = setup({
       paused: "invoice",
+      publishPolicy: "workflow_only",
       runOutcome: {
         kind: "clarification",
         workflow: "invoice",
@@ -130,7 +227,17 @@ describe("assistant handler", () => {
       runOutcome: {
         kind: "result",
         workflow: "invoice",
-        result: { status: "created", summary: "INV-1 authorised.", invoiceId: "inv-1" },
+        result: {
+          status: "created",
+          summary: "INV-1 authorised.",
+          invoiceId: "inv-1",
+          completedApproval: {
+            name: "xero_authorise_invoice",
+            provider: "xero",
+            ref: "inv-1",
+            label: "INV-1 authorised.",
+          },
+        },
       },
       graphState: {
         messages: [new AIMessage("All done — invoice INV-1 is authorised.")],

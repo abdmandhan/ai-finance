@@ -14,6 +14,7 @@ describe("config schema", () => {
     expect(config.worker.enabled).toBe(false);
     expect(config.worker.concurrency).toBe(10);
     expect(config.worker.max_attempts).toBe(3);
+    expect(config.assistant.publish_policy).toBe("always_publish");
     expect(config.kafka.topics.inbound_error).toBe("chat.inbound.error");
   });
 
@@ -29,5 +30,23 @@ describe("config schema", () => {
     expect(config.llm.small.api_key).toBe("tier-key");
     expect(config.llm.small.model).toBe("openai:gpt-4o-mini");
     expect(config.llm.medium.api_key).toBe(""); // falls back to shared at resolve time
+  });
+
+  it("accepts workflow_only assistant publish policy", () => {
+    const config = configUtils.configSchema.parse({
+      kafka: {},
+      assistant: { publish_policy: "workflow_only" },
+    });
+
+    expect(config.assistant.publish_policy).toBe("workflow_only");
+  });
+
+  it("rejects invalid assistant publish policy values", () => {
+    expect(() =>
+      configUtils.configSchema.parse({
+        kafka: {},
+        assistant: { publish_policy: "sometimes" },
+      }),
+    ).toThrow();
   });
 });

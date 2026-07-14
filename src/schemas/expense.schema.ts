@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { completedApprovalSchema } from "./completed-approval.schema";
 import { invoiceLineSchema } from "./invoice.schema";
 
 /**
@@ -60,6 +61,7 @@ export const expenseResultSchema = z.object({
   bankTransactionId: z.string().optional(),
   transferId: z.string().optional(),
   summary: z.string(),
+  completedApproval: completedApprovalSchema.optional(),
 });
 export type ExpenseResult = z.infer<typeof expenseResultSchema>;
 

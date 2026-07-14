@@ -17,6 +17,7 @@ import {
   extractInterrupt,
   isAffirmative,
   threadKey,
+  workflowDisplayNameOf,
 } from "@/services";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
@@ -61,7 +62,7 @@ export function createLegacyHandler(deps: LegacyHandlerDeps) {
     workflow: Workflow,
     chatId: string,
   ): Promise<void> {
-    const label = workflow === "invoice" ? "Invoicing" : "Scheduling";
+    const label = workflowDisplayNameOf[workflow];
     const text = `The ${label} agent is currently disabled for your workspace.`;
     await kafka.publishOutbound({
       ...correlations.baseOutbound(chatId),
@@ -171,26 +172,25 @@ export function createLegacyHandler(deps: LegacyHandlerDeps) {
       return;
     }
 
-    const created = result.status === "created";
     // Informational reply (schedule lookup) — nothing created, no approvalData.
     const answered = result.status === "answered";
     const answer =
-      created && result.htmlLink
+      result.completedApproval && result.htmlLink
         ? `${result.summary}\n${result.htmlLink}`
         : result.summary;
-    // Post-hoc approvalData record for a completed action (calendar event or authorised invoice).
-    const ref = result.eventId ?? result.invoiceId;
+    const completed = result.completedApproval;
     const approvalData =
-      created && ref
+      completed
         ? [
             {
-              name:
-                workflow === "invoice"
-                  ? "xero_authorise_invoice"
-                  : "create_calendar_event",
-              provider: workflow === "invoice" ? "xero" : "calendar",
+              name: completed.name,
+              provider: completed.provider,
               items: [
-                { ref, label: result.summary, status: "completed" as const },
+                {
+                  ref: completed.ref,
+                  label: completed.label ?? result.summary,
+                  status: "completed" as const,
+                },
               ],
             },
           ]
@@ -201,7 +201,7 @@ export function createLegacyHandler(deps: LegacyHandlerDeps) {
       content: [{ type: "text", text: answer }],
       output: {
         answer,
-        intent: created ? "call_tool" : answered ? "ok" : "not_supported",
+        intent: completed ? "call_tool" : answered ? "ok" : "not_supported",
         agentKey,
         ...(approvalData ? { approvalData } : {}),
       },

@@ -32,11 +32,18 @@ export function makeExecuteExpenseNode(deps: ExpenseDeps) {
             Amount: state.amount!,
             ...(state.resolvedDate ? { Date: state.resolvedDate } : {}),
           });
+          const resultSummary = `Transferred ${state.amount} from ${state.resolvedFromAccount?.name} to ${state.resolvedToAccount?.name}.`;
           return {
             result: {
               status: "created" as const,
               transferId: transfer.BankTransferID,
-              summary: `Transferred ${state.amount} from ${state.resolvedFromAccount?.name} to ${state.resolvedToAccount?.name}.`,
+              summary: resultSummary,
+              completedApproval: {
+                name: "xero_bank_transfer",
+                provider: "xero",
+                ref: transfer.BankTransferID,
+                label: resultSummary,
+              },
             },
             _nextNode: EXPENSE_NODES.finalize,
           };
@@ -101,12 +108,21 @@ export function makeExecuteExpenseNode(deps: ExpenseDeps) {
           };
         }
         const total = lines.reduce((s, l) => s + l.Quantity * l.UnitAmount, 0);
+        const resultSummary = `Recorded ${state.kind === "receive" ? "receive" : "spend"}-money of ${total} against ${state.resolvedBankAccount?.name}.`;
+        const completedName =
+          state.kind === "receive" ? "xero_receive_money" : "xero_spend_money";
         return {
           bankTransactionId: txn.BankTransactionID,
           result: {
             status: "created" as const,
             bankTransactionId: txn.BankTransactionID,
-            summary: `Recorded ${state.kind === "receive" ? "receive" : "spend"}-money of ${total} against ${state.resolvedBankAccount?.name}.`,
+            summary: resultSummary,
+            completedApproval: {
+              name: completedName,
+              provider: "xero",
+              ref: txn.BankTransactionID,
+              label: resultSummary,
+            },
           },
           _nextNode: EXPENSE_NODES.attach,
         };

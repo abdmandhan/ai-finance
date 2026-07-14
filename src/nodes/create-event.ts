@@ -4,8 +4,7 @@ import { emitProgress, NODES, type ScheduleDeps } from "./shared";
 
 /**
  * Create the calendar event immediately — no approval gate (mirrors the Agent, which
- * writes the event on the calendar the moment the tool runs). The approval record is
- * emitted post-hoc by the runtime driver, not held here.
+ * writes the event on the calendar the moment the tool runs).
  */
 export function makeCreateEventNode(deps: ScheduleDeps) {
   return {
@@ -71,12 +70,19 @@ export function makeCreateEventNode(deps: ScheduleDeps) {
           : state.location
             ? ` at ${state.location}`
             : "";
+        const resultSummary = `${summary} scheduled for ${when}${where}`;
         return {
           result: {
             status: "created" as const,
             eventId,
             htmlLink,
-            summary: `${summary} scheduled for ${when}${where}`,
+            summary: resultSummary,
+            completedApproval: {
+              name: "create_calendar_event",
+              provider: "calendar",
+              ref: eventId,
+              label: resultSummary,
+            },
           },
           _nextNode: NODES.notify,
         };

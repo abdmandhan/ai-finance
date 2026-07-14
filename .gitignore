@@ -4,3 +4,7 @@ config.toml
 *.log
 .env
 .langgraph_api/
+allure-results/
+allure-results-eval/
+allure-report/
+allure-report-eval/

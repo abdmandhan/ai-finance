@@ -24,6 +24,8 @@ export {
   extractInterrupt,
   isAffirmative,
   threadKey,
+  workflowDisplayNameOf,
+  type CompletedApproval,
   type GraphResult,
   type RunnableGraph,
   type RunWorkflow,

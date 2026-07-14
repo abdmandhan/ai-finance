@@ -4,8 +4,8 @@ import type { AssistantWorkflowOutcome } from "@/schemas";
 // Concrete module (not the `@/services` barrel) so Studio dev harnesses that load
 // this node do not pull in kafka.service.ts and the native Kafka addon.
 import {
-  agentKeyOf,
   enablementKeyOf,
+  workflowDisplayNameOf,
   type Workflow,
 } from "@/services/workflow-runner";
 import { ToolMessage, type AIMessage } from "@langchain/core/messages";
@@ -118,7 +118,7 @@ function toolResultFor(outcome: AssistantWorkflowOutcome): unknown {
     case "agent_disabled":
       return {
         status: "agent_disabled",
-        message: `The ${agentKeyOf[outcome.workflow]} agent is currently disabled for this workspace.`,
+        message: `The ${workflowDisplayNameOf[outcome.workflow]} agent is currently disabled for this workspace.`,
       };
     case "result":
       return outcome.result;

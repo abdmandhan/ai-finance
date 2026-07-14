@@ -57,7 +57,7 @@ describe("outcomeToOutput", () => {
   });
 
   const result = (
-    workflow: "schedule" | "invoice",
+    workflow: AssistantWorkflowOutcome["workflow"],
     over: Record<string, unknown>,
   ): AssistantWorkflowOutcome => ({
     kind: "result",
@@ -65,29 +65,69 @@ describe("outcomeToOutput", () => {
     result: { status: "failed", summary: "s", ...over },
   });
 
-  it("maps created (schedule) to call_tool with completed approvalData", () => {
+  it("does not infer completed approvalData from ids alone", () => {
     const out = outcomeToOutput(
       result("schedule", { status: "created", eventId: "ev-1" }),
       "Booked",
     );
+    expect(out.intent).toBe("not_supported");
+    expect(out.approvalData).toBeUndefined();
+  });
+
+  it.each([
+    ["schedule", "created", "create_calendar_event", "calendar", "ev-1"],
+    ["invoice", "created", "xero_authorise_invoice", "xero", "inv-9"],
+    ["payment", "created", "xero_apply_payment", "xero", "pay-1"],
+    ["payment", "created", "xero_create_credit_note", "xero", "cn-1"],
+    ["payment", "reversed", "xero_reverse_payment", "xero", "pay-2"],
+    ["payment", "voided", "xero_void_invoice", "xero", "inv-void"],
+    ["expense", "created", "xero_spend_money", "xero", "bt-spend"],
+    ["expense", "created", "xero_receive_money", "xero", "bt-receive"],
+    ["expense", "created", "xero_bank_transfer", "xero", "tr-1"],
+  ] as const)(
+    "maps completed %s/%s to %s approvalData",
+    (workflow, status, name, provider, ref) => {
+      const out = outcomeToOutput(
+        result(workflow, {
+          status,
+          completedApproval: { name, provider, ref, label: "Done." },
+        }),
+        "Done",
+      );
+
+      expect(out.intent).toBe("call_tool");
+      expect(out.approvalData).toEqual([
+        {
+          name,
+          provider,
+          items: [{ ref, label: "Done.", status: "completed" }],
+        },
+      ]);
+    },
+  );
+
+  it("falls back to result summary when completed approval has no label", () => {
+    const out = outcomeToOutput(
+      result("payment", {
+        status: "created",
+        summary: "Payment recorded.",
+        completedApproval: {
+          name: "xero_apply_payment",
+          provider: "xero",
+          ref: "pay-1",
+        },
+      }),
+      "Payment recorded.",
+    );
+
     expect(out.intent).toBe("call_tool");
     expect(out.approvalData).toEqual([
       {
-        name: "create_calendar_event",
-        provider: "calendar",
-        items: [{ ref: "ev-1", label: "s", status: "completed" }],
+        name: "xero_apply_payment",
+        provider: "xero",
+        items: [{ ref: "pay-1", label: "Payment recorded.", status: "completed" }],
       },
     ]);
-  });
-
-  it("maps created (invoice) to call_tool with xero approvalData", () => {
-    const out = outcomeToOutput(
-      result("invoice", { status: "created", invoiceId: "inv-9" }),
-      "Authorised",
-    );
-    expect(out.approvalData?.[0]?.name).toBe("xero_authorise_invoice");
-    expect(out.approvalData?.[0]?.provider).toBe("xero");
-    expect(out.approvalData?.[0]?.items?.[0]?.ref).toBe("inv-9");
   });
 
   it("maps proposed to needs_clarification", () => {
@@ -126,12 +166,20 @@ describe("defaultAnswerFor", () => {
   });
 
   it("matches the legacy disabled wording", () => {
-    expect(defaultAnswerFor({ kind: "agent_disabled", workflow: "schedule" })).toBe(
-      "The Scheduling agent is currently disabled for your workspace.",
-    );
-    expect(defaultAnswerFor({ kind: "agent_disabled", workflow: "invoice" })).toBe(
-      "The Invoicing agent is currently disabled for your workspace.",
-    );
+    expect(
+      [
+        ["schedule", "Scheduling"],
+        ["invoice", "Invoicing"],
+        ["payment", "Payments"],
+        ["expense", "Expense"],
+        ["report", "Reporting"],
+      ].map(([workflow, label]) =>
+        defaultAnswerFor({
+          kind: "agent_disabled",
+          workflow: workflow as AssistantWorkflowOutcome["workflow"],
+        }) === `The ${label} agent is currently disabled for your workspace.`,
+      ),
+    ).toEqual([true, true, true, true, true]);
   });
 
   it("appends open slots for proposed and htmlLink for created", () => {

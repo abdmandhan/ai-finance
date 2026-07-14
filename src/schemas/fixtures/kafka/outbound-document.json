@@ -1,0 +1,25 @@
+{
+  "requestId": "req-004",
+  "chatId": "chat-004",
+  "messageId": "msg-004",
+  "tenantId": "tenant-001",
+  "provider": "telegram",
+  "content": [
+    {
+      "type": "text",
+      "text": "I attached the invoice PDF for review."
+    },
+    {
+      "type": "document",
+      "fileId": "file-001",
+      "url": "https://files.example.test/invoice-100.pdf",
+      "mimeType": "application/pdf",
+      "fileName": "invoice-100.pdf",
+      "size": 48291
+    }
+  ],
+  "output": {
+    "answer": "I attached the invoice PDF for review.",
+    "intent": "ok"
+  }
+}

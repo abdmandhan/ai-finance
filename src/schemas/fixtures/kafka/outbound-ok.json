@@ -1,0 +1,17 @@
+{
+  "requestId": "req-001",
+  "chatId": "chat-001",
+  "messageId": "msg-001",
+  "tenantId": "tenant-001",
+  "provider": "telegram",
+  "content": [
+    {
+      "type": "text",
+      "text": "Accrual accounting records income when it is earned."
+    }
+  ],
+  "output": {
+    "answer": "Accrual accounting records income when it is earned.",
+    "intent": "ok"
+  }
+}

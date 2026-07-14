@@ -1,5 +1,5 @@
 import type { AssistantWorkflowOutcome, OutboundOutput } from "@/schemas";
-import { agentKeyOf } from "@/services";
+import { agentKeyOf, workflowDisplayNameOf } from "@/services";
 
 /**
  * Map a workflow outcome + user-facing answer to the outbound `output` object.
@@ -8,7 +8,7 @@ import { agentKeyOf } from "@/services";
  *   - agent_disabled                  -> intent "not_supported" + agentKey
  *   - clarification                   -> intent "needs_clarification"
  *   - approval (pending)              -> intent "call_tool" + pending approvalData
- *   - result created                  -> intent "call_tool" + completed approvalData
+ *   - result with completedApproval   -> intent "call_tool" + completed approvalData
  *   - result proposed                 -> intent "needs_clarification"
  *   - result answered                 -> intent "ok"
  *   - anything else                   -> intent "not_supported"
@@ -46,28 +46,27 @@ export function outcomeToOutput(
       if (result.status === "proposed") {
         return { answer, intent: "needs_clarification", agentKey };
       }
-      const created = result.status === "created";
       const answered = result.status === "answered";
-      // Post-hoc approvalData record for a completed action (calendar event or authorised invoice).
-      const ref = result.eventId ?? result.invoiceId;
+      const completed = result.completedApproval;
       const approvalData =
-        created && ref
+        completed
           ? [
               {
-                name:
-                  outcome.workflow === "invoice"
-                    ? "xero_authorise_invoice"
-                    : "create_calendar_event",
-                provider: outcome.workflow === "invoice" ? "xero" : "calendar",
+                name: completed.name,
+                provider: completed.provider,
                 items: [
-                  { ref, label: result.summary, status: "completed" as const },
+                  {
+                    ref: completed.ref,
+                    label: completed.label ?? result.summary,
+                    status: "completed" as const,
+                  },
                 ],
               },
             ]
           : undefined;
       return {
         answer,
-        intent: created ? "call_tool" : answered ? "ok" : "not_supported",
+        intent: completed ? "call_tool" : answered ? "ok" : "not_supported",
         agentKey,
         ...(approvalData ? { approvalData } : {}),
       };
@@ -86,7 +85,7 @@ export function defaultAnswerFor(outcome: AssistantWorkflowOutcome): string {
     case "approval":
       return outcome.message;
     case "agent_disabled": {
-      const label = outcome.workflow === "invoice" ? "Invoicing" : "Scheduling";
+      const label = workflowDisplayNameOf[outcome.workflow];
       return `The ${label} agent is currently disabled for your workspace.`;
     }
     case "result": {

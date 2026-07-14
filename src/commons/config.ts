@@ -108,8 +108,16 @@ const configSchema = z.object({
       enabled: z.boolean().default(true),
       // Cap on prior conversation messages replayed to the model each turn.
       max_history_messages: z.number().default(30),
+      // Cutover switch while Agent still runs in parallel.
+      publish_policy: z
+        .enum(["always_publish", "workflow_only"])
+        .default("always_publish"),
     })
-    .default({ enabled: true, max_history_messages: 30 }),
+    .default({
+      enabled: true,
+      max_history_messages: 30,
+      publish_policy: "always_publish",
+    }),
   agents: z
     .object({
       // Backend endpoint that resolves per-tenant/per-member agent enablement, used to gate a

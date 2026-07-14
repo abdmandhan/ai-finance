@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { completedApprovalSchema } from "./completed-approval.schema";
 
 /**
  * Zod mirror of the workflow-runner's `WorkflowOutcome`, stored in assistant
@@ -51,6 +52,7 @@ export const workflowOutcomeSchema = z.discriminatedUnion("kind", [
       suggestedSlots: z
         .array(z.object({ start: z.string(), end: z.string() }))
         .optional(),
+      completedApproval: completedApprovalSchema.optional(),
     }),
   }),
   z.object({

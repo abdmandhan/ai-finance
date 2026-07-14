@@ -18,5 +18,10 @@ export default defineConfig({
     testTimeout: 1000 * 60 * 10,
     retry: 1, // LLM flakiness
     maxConcurrency: 2, // provider rate limits
+    setupFiles: ["allure-vitest/setup"],
+    reporters: [
+      "default",
+      ["allure-vitest/reporter", { resultsDir: "allure-results-eval" }],
+    ],
   },
 });

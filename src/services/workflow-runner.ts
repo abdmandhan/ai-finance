@@ -6,6 +6,14 @@ import type { AgentEnablement } from "./agent-enablement";
 /** The strict workflows this service can run. Each one is a compiled LangGraph graph. */
 export type Workflow = "schedule" | "invoice" | "payment" | "expense" | "report";
 
+/** Completed write metadata that becomes outbound `approvalData`. */
+export interface CompletedApproval {
+  name: string;
+  provider: string;
+  ref: string;
+  label?: string;
+}
+
 /** Minimal graph surface the runner needs — avoids unioning the two giant compiled types. */
 export interface RunnableGraph {
   invoke(input: unknown, config: RunnableConfig): Promise<unknown>;
@@ -27,6 +35,7 @@ export interface GraphResult {
   period?: { from: string; to: string; label: string };
   basis?: string;
   suggestedSlots?: { start: string; end: string }[];
+  completedApproval?: CompletedApproval;
 }
 
 /**
@@ -66,6 +75,15 @@ export const enablementKeyOf: Record<Workflow, keyof AgentEnablement> = {
   payment: "invoicing",
   expense: "expense",
   report: "invoicing",
+};
+
+/** Human-facing label for workflow-specific assistant messages. */
+export const workflowDisplayNameOf: Record<Workflow, string> = {
+  schedule: "Scheduling",
+  invoice: "Invoicing",
+  payment: "Payments",
+  expense: "Expense",
+  report: "Reporting",
 };
 
 /** Per-workflow thread namespace so graph checkpoints never collide on one chat. */

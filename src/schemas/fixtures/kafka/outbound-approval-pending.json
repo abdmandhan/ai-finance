@@ -1,0 +1,31 @@
+{
+  "requestId": "req-002",
+  "chatId": "chat-002",
+  "messageId": "msg-002",
+  "tenantId": "tenant-001",
+  "provider": "telegram",
+  "content": [
+    {
+      "type": "text",
+      "text": "Draft invoice INV-100 is ready. Reply approve to authorise it."
+    }
+  ],
+  "output": {
+    "answer": "Draft invoice INV-100 is ready. Reply approve to authorise it.",
+    "intent": "call_tool",
+    "agentKey": "invoicing",
+    "approvalData": [
+      {
+        "name": "xero_authorise_invoice",
+        "provider": "xero",
+        "items": [
+          {
+            "ref": "inv-100",
+            "label": "INV-100 for Acme",
+            "status": "pending"
+          }
+        ]
+      }
+    ]
+  }
+}

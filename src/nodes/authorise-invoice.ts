@@ -30,11 +30,18 @@ export function makeAuthoriseInvoiceNode(deps: InvoiceDeps) {
           auth,
           state.invoiceId,
         );
+        const resultSummary = `Authorised ${kind} for ${state.contactName}.`;
         return {
           result: {
             status: "created" as const,
             invoiceId: authorised.InvoiceID,
-            summary: `Authorised ${kind} for ${state.contactName}.`,
+            summary: resultSummary,
+            completedApproval: {
+              name: "xero_authorise_invoice",
+              provider: "xero",
+              ref: authorised.InvoiceID,
+              label: resultSummary,
+            },
           },
           _nextNode: INVOICE_NODES.finalize,
         };

@@ -1,0 +1,10 @@
+{
+  "stage": "create_event",
+  "msg": "Creating the meeting...",
+  "timestamp": "2026-07-14T03:00:05.000Z",
+  "toolName": "schedule_meeting",
+  "phase": "running",
+  "tenantId": "tenant-001",
+  "requestId": "req-001",
+  "messageId": "msg-001"
+}

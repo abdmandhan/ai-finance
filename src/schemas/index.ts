@@ -1,4 +1,9 @@
 export {
+  completedApprovalSchemas,
+  completedApprovalSchema,
+  type CompletedApproval,
+} from "./completed-approval.schema";
+export {
   scheduleSchemas,
   slotSchema,
   scheduleIntentSchema,

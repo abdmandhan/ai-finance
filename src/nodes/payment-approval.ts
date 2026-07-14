@@ -7,7 +7,13 @@ import {
   type ResumeInput,
 } from "./shared";
 
-const APPROVAL_NAMES: Record<string, string> = {
+type ApprovalAction =
+  | "apply_payment"
+  | "reverse_payment"
+  | "create_credit_note"
+  | "void_invoice";
+
+const APPROVAL_NAMES: Record<ApprovalAction, string> = {
   apply_payment: "xero_apply_payment",
   reverse_payment: "xero_reverse_payment",
   create_credit_note: "xero_create_credit_note",
@@ -67,19 +73,29 @@ export function makePaymentApprovalNode(deps: PaymentDeps) {
           label = `credit note ${state.resolvedAmount} for ${state.contactName}`;
           break;
         }
-        default:
-          // void_invoice
+        case "void_invoice":
           message =
             `Void ${docLabel} — this cancels the document in Xero and cannot be undone. ` +
             "Reply 'approve' to void it.";
           label = `void ${docLabel}`;
+          break;
+        default:
+          return {
+            approved: false,
+            result: {
+              status: "failed" as const,
+              invoiceId: inv?.id,
+              summary: `Unsupported payment action: ${state.action ?? "unknown"}. Nothing was recorded in Xero.`,
+            },
+            _nextNode: PAYMENT_NODES.finalize,
+          };
       }
 
       const payload: InterruptPayload = {
         kind: "approval",
         message,
         approval: {
-          name: APPROVAL_NAMES[state.action ?? ""] ?? "xero_payment_operation",
+          name: APPROVAL_NAMES[state.action],
           provider: "xero",
           items: [{ ref, label }],
         },

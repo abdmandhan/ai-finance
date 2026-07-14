@@ -1,0 +1,17 @@
+{
+  "requestId": "req-001",
+  "chatId": "chat-001",
+  "createdBy": "user-001",
+  "role": "human",
+  "content": [
+    {
+      "type": "text",
+      "text": "Please book a meeting with Sarah tomorrow at 10."
+    }
+  ],
+  "provider": "telegram",
+  "messageId": "msg-001",
+  "chatType": "direct",
+  "tenantId": "tenant-001",
+  "timestamp": "2026-07-14T03:00:00.000Z"
+}

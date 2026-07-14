@@ -13,6 +13,10 @@ import type {
 import { enablementKeyOf, isAffirmative } from "@/services";
 import { HumanMessage } from "@langchain/core/messages";
 import { Command } from "@langchain/langgraph";
+import {
+  shouldPublishAssistantOutbound,
+  type AssistantPublishPolicy,
+} from "./cutover-policy";
 import { defaultAnswerFor, outcomeToOutput } from "./outbound";
 import {
   inboundAttachments,
@@ -30,6 +34,7 @@ export interface AssistantHandlerDeps {
   /** The compiled assistant graph (thread_id `assistant:<chatId>`). */
   assistantGraph: RunnableGraph;
   correlations: CorrelationStore;
+  publishPolicy?: AssistantPublishPolicy;
 }
 
 /** Text of the last AI message in a graph result state. */
@@ -77,6 +82,7 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
     pausedWorkflow,
     assistantGraph,
     correlations,
+    publishPolicy = "always_publish",
   } = deps;
 
   async function publish(
@@ -214,14 +220,19 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
         enablement,
         workflowReport: null,
       });
-      await publish(
-        chatId,
-        outcome,
+      const finalAnswer =
         answer ||
-          (outcome
-            ? defaultAnswerFor(outcome)
-            : "Sorry, I could not produce a reply."),
-      );
+        (outcome
+          ? defaultAnswerFor(outcome)
+          : "Sorry, I could not produce a reply.");
+      if (shouldPublishAssistantOutbound(publishPolicy, outcome)) {
+        await publish(chatId, outcome, finalAnswer);
+      } else {
+        logger.info(
+          { chatId, publishPolicy },
+          "assistant pure conversation outbound suppressed",
+        );
+      }
       if (outcome?.kind === "result") {
         audit.runFinished({
           threadId: chatId,

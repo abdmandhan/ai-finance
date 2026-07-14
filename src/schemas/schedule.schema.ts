@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { completedApprovalSchema } from "./completed-approval.schema";
 
 /**
  * A concrete calendar availability window returned by the calendar tool.
@@ -190,6 +191,7 @@ export const scheduleResultSchema = z.object({
   htmlLink: z.string().optional(),
   suggestedSlots: z.array(slotSchema).optional(),
   summary: z.string(),
+  completedApproval: completedApprovalSchema.optional(),
 });
 export type ScheduleResult = z.infer<typeof scheduleResultSchema>;
 

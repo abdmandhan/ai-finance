@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { completedApprovalSchema } from "./completed-approval.schema";
 import { invoiceLineSchema } from "./invoice.schema";
 
 /**
@@ -65,6 +66,7 @@ export const paymentResultSchema = z.object({
   invoiceId: z.string().optional(),
   remainingAmountDue: z.number().optional(),
   summary: z.string(),
+  completedApproval: completedApprovalSchema.optional(),
 });
 export type PaymentResult = z.infer<typeof paymentResultSchema>;
 
