@@ -39,6 +39,7 @@ export {
   type PeriodToken,
   type ResolvedPeriod,
 } from "./periods";
+export { isIanaTimezone, toIanaTimezone } from "./xero-timezone";
 export {
   bankAccountsOf,
   buildInvoiceWhere,

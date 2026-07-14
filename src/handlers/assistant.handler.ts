@@ -98,7 +98,7 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
     userId: string;
     humanText: string;
     attachments: { url: string; mimeType: string; fileName: string }[];
-    enablement: { scheduling: boolean; invoicing: boolean };
+    enablement: { scheduling: boolean; invoicing: boolean; expense: boolean };
     workflowReport: AssistantWorkflowOutcome | null;
   }): Promise<{ outcome: AssistantWorkflowOutcome | null; answer: string }> {
     const runConfig = {
@@ -147,6 +147,7 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
       const enablement = {
         scheduling: enabled.scheduling,
         invoicing: enabled.invoicing,
+        expense: enabled.expense,
       };
 
       // Resume a paused workflow if one is waiting on this chat — gated too, so

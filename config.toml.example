@@ -23,6 +23,9 @@ model = "anthropic:claude-sonnet-4-5-20250929"
 # Redis powers the hot checkpointer tier and the queue pipeline.
 # Empty url -> both off: checkpointer falls back to Postgres/MemorySaver,
 # queue-backed consumption unavailable (worker.enabled must stay false).
+# Hot checkpointer (RedisSaver) requires Redis Stack or Redis 8+ with
+# RedisJSON + RediSearch. Plain Redis is fine for queue/cache; without those
+# modules the service uses Postgres for checkpoints automatically.
 url = ""              # e.g. "redis://localhost:6379"
 password = ""
 

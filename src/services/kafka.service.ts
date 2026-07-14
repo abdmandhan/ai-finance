@@ -68,7 +68,7 @@ export class KafkaService implements IKafkaService {
     this.consumer = this.kafka.consumer({
       ...this.baseConfig(),
       "group.id": this.config.kafka.group_id,
-      "auto.offset.reset": "earliest",
+      "auto.offset.reset": "latest",
     } as KafkaJS.ConsumerConstructorConfig);
     await this.consumer.connect();
     this.logger.info({ broker: this.config.kafka.url }, "Kafka connected");
@@ -78,6 +78,10 @@ export class KafkaService implements IKafkaService {
     if (!this.consumer)
       throw new Error("Kafka not connected — call connect() first");
     await this.consumer.subscribe({ topic });
+    // Skip any backlog: seek every partition to its high watermark before
+    // run(). Pending seeks apply on assignment, and auto-commit persists them
+    // so we only receive messages produced after this join.
+    await this.seekToEnd(topic);
     await this.consumer.run({
       eachMessage: async ({ message }) => {
         const value = message.value?.toString();
@@ -89,6 +93,28 @@ export class KafkaService implements IKafkaService {
         }
       },
     });
+  }
+
+  /** Seek all topic partitions to the log end (high watermark). */
+  private async seekToEnd(topic: string): Promise<void> {
+    if (!this.consumer)
+      throw new Error("Kafka not connected — call connect() first");
+    const admin = this.kafka.admin(
+      this.baseConfig() as KafkaJS.AdminConstructorConfig,
+    );
+    await admin.connect();
+    try {
+      const offsets = await admin.fetchTopicOffsets(topic);
+      for (const { partition, high } of offsets) {
+        this.consumer.seek({ topic, partition, offset: high });
+      }
+      this.logger.info(
+        { topic, partitions: offsets.length },
+        "Kafka consumer seeked to end (new messages only)",
+      );
+    } finally {
+      await admin.disconnect();
+    }
   }
 
   private async send(topic: string, key: string, event: object): Promise<void> {

@@ -83,6 +83,22 @@ describe("assistant handler", () => {
     expect(out.output.answer).toContain("Accrual accounting");
   });
 
+  it("forwards the expense enablement flag into the assistant graph", async () => {
+    const { handler, assistantGraph } = setup({
+      enablement: { scheduling: true, invoicing: false, expense: true },
+      graphState: { messages: [new AIMessage("ok")], outcome: null },
+    });
+
+    await handler(inbound("record $20 parking from the business account"));
+
+    const [input] = assistantGraph.invoke.mock.calls[0];
+    expect(input.enablement).toEqual({
+      scheduling: true,
+      invoicing: false,
+      expense: true,
+    });
+  });
+
   it("resumes a paused workflow first; a re-interrupt is relayed verbatim", async () => {
     const { handler, publishOutbound, runWorkflow, assistantGraph } = setup({
       paused: "invoice",

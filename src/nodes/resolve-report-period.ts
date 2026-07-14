@@ -1,4 +1,8 @@
-import { resolvePeriod, type PeriodToken } from "@/commons";
+import {
+  resolvePeriod,
+  toIanaTimezone,
+  type PeriodToken,
+} from "@/commons";
 import type { ReportStateType } from "@/graphs/report.state";
 import { REPORT_NODES, type ReportDeps } from "./shared";
 
@@ -13,7 +17,8 @@ export function makeResolveReportPeriodNode(deps: ReportDeps) {
     node: async (state: ReportStateType) => {
       const auth = await deps.resolveXeroAuth(state.tenantId);
       const org = await deps.xeroTool.getOrganisation(auth);
-      const timezone = org.Timezone ?? "UTC";
+      // Xero returns Windows-style enums (SEASIASTANDARDTIME); Intl needs IANA.
+      const timezone = toIanaTimezone(org.Timezone ?? "UTC");
       const now = deps.now?.() ?? new Date();
 
       let token = (state.periodToken ?? "none") as PeriodToken;

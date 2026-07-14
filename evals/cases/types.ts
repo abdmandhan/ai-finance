@@ -14,7 +14,10 @@ export type StubOpKind =
   | "bankTransactions"
   | "bankTransfers"
   | "attachedToBankTransactions"
-  | "statusUpdates";
+  | "statusUpdates"
+  // Read-side records — proof a read-only workflow actually queried Xero.
+  | "reportRequests"
+  | "invoiceQueries";
 
 export interface OpExpectation {
   count?: number;

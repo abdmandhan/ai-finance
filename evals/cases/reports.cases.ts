@@ -91,4 +91,21 @@ export const reportCases: EvalCase[] = [
       mustNotOps: [...WRITE_OPS],
     },
   },
+  {
+    // Regression for DEBUG-5-xero.md: the assistant used to over-clarify
+    // ("which system? what counts as spend?") and give up instead of calling
+    // financial_report. This asserts it routes straight to the report tool.
+    id: "XERO-EXP-004-assistant",
+    title: "'how much did we spend this month?' routes to financial_report, no over-clarify",
+    level: "assistant",
+    prompt: "How much did we spend this month?",
+    expect: {
+      // Report is read-only — no approval, and no write of any kind.
+      interrupt: "none",
+      // Proof the model routed to financial_report instead of answering from
+      // memory or over-clarifying: the report graph actually queried Xero's P&L.
+      ops: { reportRequests: {} },
+      mustNotOps: [...WRITE_OPS],
+    },
+  },
 ];
