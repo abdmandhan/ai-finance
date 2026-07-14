@@ -193,6 +193,14 @@ export function makeAssistantExecuteToolsNode(deps: AssistantDeps) {
           continue;
         }
 
+        deps.processLog?.log({
+          event: "assistant.tool_selected",
+          stage: "assistant",
+          workflow,
+          tool: call.name,
+          payload: { args: call.args, callId },
+        });
+
         emitProgress(deps, state.chatId, call.name, "Working on it...");
         deps.audit.runStarted({
           threadId: state.chatId,
@@ -232,6 +240,14 @@ export function makeAssistantExecuteToolsNode(deps: AssistantDeps) {
               callId,
             ),
           );
+          deps.processLog?.log({
+            event: "assistant.tool_result",
+            stage: "assistant",
+            workflow,
+            tool: call.name,
+            status: "error",
+            error: err,
+          });
           continue;
         }
 
@@ -248,6 +264,14 @@ export function makeAssistantExecuteToolsNode(deps: AssistantDeps) {
         messages.push(
           new ToolMessage(JSON.stringify(toolResultFor(run)), callId),
         );
+        deps.processLog?.log({
+          event: "assistant.tool_result",
+          stage: "assistant",
+          workflow,
+          tool: call.name,
+          status: run.kind,
+          payload: { outcome: run },
+        });
       }
 
       return { messages, outcome, _nextNode: ASSISTANT_NODES.callModel };

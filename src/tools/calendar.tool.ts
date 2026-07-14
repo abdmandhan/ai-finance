@@ -6,6 +6,7 @@
  */
 import type { ILogger } from "@/commons";
 import type { CalendarAuth } from "@/services/google-auth";
+import type { IProcessLogService } from "@/services/process-log.service";
 
 export interface CalendarEvent {
   eventId: string;
@@ -53,27 +54,61 @@ async function gcalRequest<T = unknown>(
   method: "GET" | "POST" | "PATCH",
   path: string,
   body?: unknown,
+  processLog?: IProcessLogService,
 ): Promise<T> {
-  const res = await fetch(`${GCAL_BASE}${path}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${auth.accessToken}`,
-      accept: "application/json",
-      ...(body ? { "content-type": "application/json" } : {}),
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
+  const started = Date.now();
+  const tool = `calendar.${method} ${path.split("?")[0]}`;
+  processLog?.log({
+    event: "tool.call",
+    stage: "calendar.start",
+    tool,
+    payload: { method, path, body },
   });
-  const text = await res.text();
-  if (!res.ok)
-    throw new Error(
-      `gcal ${method} ${path} ${res.status}: ${text.slice(0, 500)}`,
-    );
-  return (text ? JSON.parse(text) : {}) as T;
+  try {
+    const res = await fetch(`${GCAL_BASE}${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${auth.accessToken}`,
+        accept: "application/json",
+        ...(body ? { "content-type": "application/json" } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    const text = await res.text();
+    if (!res.ok)
+      throw new Error(
+        `gcal ${method} ${path} ${res.status}: ${text.slice(0, 500)}`,
+      );
+    const parsed = (text ? JSON.parse(text) : {}) as T;
+    processLog?.log({
+      event: "tool.call",
+      stage: "calendar.end",
+      tool,
+      status: "ok",
+      durationMs: Date.now() - started,
+      payload: { method, path, statusCode: res.status, response: parsed },
+    });
+    return parsed;
+  } catch (error) {
+    processLog?.log({
+      event: "tool.call",
+      stage: "calendar.error",
+      tool,
+      status: "error",
+      durationMs: Date.now() - started,
+      payload: { method, path, body },
+      error,
+    });
+    throw error;
+  }
 }
 
 /** Real Google Calendar. */
 export class GoogleCalendarTool implements ICalendarTool {
-  constructor(private readonly logger: ILogger) {}
+  constructor(
+    private readonly logger: ILogger,
+    private readonly processLog?: IProcessLogService,
+  ) {}
 
   async listEvents(
     auth: CalendarAuth,
@@ -99,6 +134,8 @@ export class GoogleCalendarTool implements ICalendarTool {
       auth,
       "GET",
       `/calendars/${encodeURIComponent(auth.calendarId)}/events?${qs}`,
+      undefined,
+      this.processLog,
     );
 
     return (data.items ?? [])
@@ -157,6 +194,7 @@ export class GoogleCalendarTool implements ICalendarTool {
       "POST",
       `/calendars/${encodeURIComponent(auth.calendarId)}/events${query}`,
       body,
+      this.processLog,
     );
     this.logger.info({ eventId: created.id }, "calendar.createEvent");
     return {
@@ -197,6 +235,7 @@ export class GoogleCalendarTool implements ICalendarTool {
       "PATCH",
       `/calendars/${encodeURIComponent(auth.calendarId)}/events/${encodeURIComponent(eventId)}`,
       body,
+      this.processLog,
     );
     this.logger.info({ eventId }, "calendar.updateEvent");
   }
@@ -260,6 +299,9 @@ export class StubCalendarTool implements ICalendarTool {
   }
 }
 
-export function createCalendarTool(logger: ILogger): ICalendarTool {
-  return new GoogleCalendarTool(logger);
+export function createCalendarTool(
+  logger: ILogger,
+  processLog?: IProcessLogService,
+): ICalendarTool {
+  return new GoogleCalendarTool(logger, processLog);
 }

@@ -4,6 +4,7 @@
  */
 import type { ILogger } from "@/commons";
 import { buildInvoiceWhere, buildPaymentWhere } from "@/commons/xero-query";
+import type { IProcessLogService } from "@/services/process-log.service";
 import type { XeroAuth } from "@/services/xero-auth";
 
 export interface XeroLineItem {
@@ -278,7 +279,10 @@ export class XeroTool implements IXeroTool {
   // Per-tenant reference cache (accounts / tax rates / organisation).
   private readonly cache = new Map<string, { at: number; value: unknown }>();
 
-  constructor(private readonly logger: ILogger) {}
+  constructor(
+    private readonly logger: ILogger,
+    private readonly processLog?: IProcessLogService,
+  ) {}
 
   private async request<T = unknown>(
     auth: XeroAuth,
@@ -286,27 +290,58 @@ export class XeroTool implements IXeroTool {
     path: string,
     body?: unknown,
   ): Promise<T> {
-    const res = await fetch(`${auth.apiBaseUrl}${path}`, {
-      method,
-      headers: {
-        authorization: `Bearer ${auth.accessToken}`,
-        "xero-tenant-id": auth.xeroTenantId,
-        accept: "application/json",
-        ...(body ? { "content-type": "application/json" } : {}),
-      },
-      ...(method !== "GET"
-        ? { body: body ? JSON.stringify(body) : undefined }
-        : {}),
+    const started = Date.now();
+    const tool = `xero.${method} ${path.split("?")[0]}`;
+    this.processLog?.log({
+      event: "tool.call",
+      stage: "xero.start",
+      tool,
+      payload: { method, path, body },
     });
-    const text = await res.text();
-    if (!res.ok)
-      throw new Error(
-        `xero ${method} ${path} ${res.status}: ${extractXeroError(text)}`,
-      );
     try {
-      return (text ? JSON.parse(text) : {}) as T;
-    } catch {
-      return { raw: text } as T;
+      const res = await fetch(`${auth.apiBaseUrl}${path}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${auth.accessToken}`,
+          "xero-tenant-id": auth.xeroTenantId,
+          accept: "application/json",
+          ...(body ? { "content-type": "application/json" } : {}),
+        },
+        ...(method !== "GET"
+          ? { body: body ? JSON.stringify(body) : undefined }
+          : {}),
+      });
+      const text = await res.text();
+      if (!res.ok)
+        throw new Error(
+          `xero ${method} ${path} ${res.status}: ${extractXeroError(text)}`,
+        );
+      let parsed: T;
+      try {
+        parsed = (text ? JSON.parse(text) : {}) as T;
+      } catch {
+        parsed = { raw: text } as T;
+      }
+      this.processLog?.log({
+        event: "tool.call",
+        stage: "xero.end",
+        tool,
+        status: "ok",
+        durationMs: Date.now() - started,
+        payload: { method, path, statusCode: res.status, response: parsed },
+      });
+      return parsed;
+    } catch (error) {
+      this.processLog?.log({
+        event: "tool.call",
+        stage: "xero.error",
+        tool,
+        status: "error",
+        durationMs: Date.now() - started,
+        payload: { method, path, body },
+        error,
+      });
+      throw error;
     }
   }
 
@@ -431,20 +466,48 @@ export class XeroTool implements IXeroTool {
     contentType: string,
   ): Promise<void> {
     const path = `${entityPath}/Attachments/${encodeURIComponent(fileName)}`;
-    const res = await fetch(`${auth.apiBaseUrl}${path}`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${auth.accessToken}`,
-        "xero-tenant-id": auth.xeroTenantId,
-        accept: "application/json",
-        "content-type": contentType,
-      },
-      body: new Blob([bytes as BlobPart], { type: contentType }),
+    const started = Date.now();
+    this.processLog?.log({
+      event: "tool.call",
+      stage: "xero.start",
+      tool: "xero.attach",
+      payload: { entityPath, fileName, contentType, byteLength: bytes.length },
     });
-    if (!res.ok) {
-      throw new Error(
-        `xero attach ${res.status}: ${extractXeroError(await res.text())}`,
-      );
+    try {
+      const res = await fetch(`${auth.apiBaseUrl}${path}`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${auth.accessToken}`,
+          "xero-tenant-id": auth.xeroTenantId,
+          accept: "application/json",
+          "content-type": contentType,
+        },
+        body: new Blob([bytes as BlobPart], { type: contentType }),
+      });
+      if (!res.ok) {
+        throw new Error(
+          `xero attach ${res.status}: ${extractXeroError(await res.text())}`,
+        );
+      }
+      this.processLog?.log({
+        event: "tool.call",
+        stage: "xero.end",
+        tool: "xero.attach",
+        status: "ok",
+        durationMs: Date.now() - started,
+        payload: { entityPath, fileName, contentType, byteLength: bytes.length },
+      });
+    } catch (error) {
+      this.processLog?.log({
+        event: "tool.call",
+        stage: "xero.error",
+        tool: "xero.attach",
+        status: "error",
+        durationMs: Date.now() - started,
+        payload: { entityPath, fileName, contentType, byteLength: bytes.length },
+        error,
+      });
+      throw error;
     }
   }
 
@@ -1019,6 +1082,9 @@ export class StubXeroTool implements IXeroTool {
   }
 }
 
-export function createXeroTool(logger: ILogger): IXeroTool {
-  return new XeroTool(logger);
+export function createXeroTool(
+  logger: ILogger,
+  processLog?: IProcessLogService,
+): IXeroTool {
+  return new XeroTool(logger, processLog);
 }

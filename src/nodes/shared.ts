@@ -5,6 +5,7 @@ import type {
   FetchAttachment,
   IAuditService,
   ILlmService,
+  IProcessLogService,
   ResolveAuth,
   ResolveXeroAuth,
   RunWorkflow,
@@ -44,6 +45,7 @@ export interface ScheduleDeps {
    * no-op so the graph runs in Studio without a Kafka connection.
    */
   onProgress?: (chatId: string, event: ProgressEvent) => void;
+  processLog?: IProcessLogService;
 }
 
 /**
@@ -80,6 +82,7 @@ export interface InvoiceDeps {
   fetchAttachment?: FetchAttachment;
   logger: ILogger;
   onProgress?: (chatId: string, event: ProgressEvent) => void;
+  processLog?: IProcessLogService;
 }
 
 /**
@@ -115,6 +118,7 @@ export interface AssistantDeps {
   maxHistoryMessages: number;
   logger: ILogger;
   onProgress?: (chatId: string, event: ProgressEvent) => void;
+  processLog?: IProcessLogService;
 }
 
 /** Assistant-graph node names. */
@@ -148,6 +152,7 @@ export interface PaymentDeps {
   /** Injectable clock for deterministic tests; defaults to `() => new Date()`. */
   now?: () => Date;
   onProgress?: (chatId: string, event: ProgressEvent) => void;
+  processLog?: IProcessLogService;
 }
 
 /** Payment-graph node names. */
@@ -172,6 +177,7 @@ export interface ExpenseDeps {
   /** Injectable clock for deterministic tests; defaults to `() => new Date()`. */
   now?: () => Date;
   onProgress?: (chatId: string, event: ProgressEvent) => void;
+  processLog?: IProcessLogService;
 }
 
 /** Expense-graph node names. */
@@ -194,6 +200,7 @@ export interface ReportDeps {
   /** Injectable clock for deterministic tests; defaults to `() => new Date()`. */
   now?: () => Date;
   onProgress?: (chatId: string, event: ProgressEvent) => void;
+  processLog?: IProcessLogService;
 }
 
 /** Report-graph node names. NOTE: deliberately no approval node — read-only by construction. */

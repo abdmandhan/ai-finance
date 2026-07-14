@@ -32,6 +32,14 @@ export function makeAssistantCallModelNode(deps: AssistantDeps) {
       }
 
       emitProgress(deps, state.chatId, "assistant", "Thinking...");
+      deps.processLog?.log({
+        event: "assistant.thinking",
+        stage: "assistant",
+        payload: {
+          messageCount: state.messages.length,
+          workflowReport: state.workflowReport,
+        },
+      });
 
       const system = [
         new SystemMessage(
@@ -60,6 +68,21 @@ export function makeAssistantCallModelNode(deps: AssistantDeps) {
         [...system, ...history],
         relayOnly ? undefined : { tools: assistantWorkflowTools },
       );
+      deps.processLog?.log({
+        event: "assistant.model_call",
+        stage: "assistant",
+        status: "ok",
+        payload: {
+          relayOnly,
+          toolCallCount: response.tool_calls?.length ?? 0,
+          toolCalls: response.tool_calls?.map((call) => ({
+            name: call.name,
+            args: call.args,
+            id: call.id,
+          })),
+          response,
+        },
+      });
 
       return {
         messages: [response],

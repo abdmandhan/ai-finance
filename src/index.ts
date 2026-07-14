@@ -21,6 +21,7 @@ import {
   createKafkaService,
   createLlmService,
   createPausedWorkflowCheck,
+  createProcessLogService,
   createQueueService,
   createResolveAuth,
   createResolveEnablement,
@@ -42,10 +43,12 @@ import {
 async function main(): Promise<void> {
   const config = configUtils.initConfig();
   const logger = loggerUtils.createLogger(config.log);
+  const processLog = createProcessLogService(config, logger);
+  const stopProcessLogRetention = processLog.startRetention();
 
   const kafka = createKafkaService(config, logger);
   const audit = createAuditService(logger);
-  const llmService = createLlmService(config.llm, logger);
+  const llmService = createLlmService(config.llm, logger, processLog);
   const resolveEnablement = createResolveEnablement(
     config.agents.enablement_endpoint_base_url,
     logger,
@@ -67,7 +70,7 @@ async function main(): Promise<void> {
   const scheduleGraph = buildScheduleGraph(
     {
       llmService,
-      calendarTool: createCalendarTool(logger),
+      calendarTool: createCalendarTool(logger, processLog),
       contactsTool: createContactsTool(logger),
       mapsTool: createMapsTool(config.calendar.maps_api_key, logger),
       resolveAuth: createResolveAuth(config.calendar.token_endpoint_base_url),
@@ -80,13 +83,14 @@ async function main(): Promise<void> {
       preferencesTool: createPreferencesTool(config.database.url, logger),
       logger,
       onProgress,
+      processLog,
     },
     checkpointer,
   );
 
   // The Xero write/read workflows share one XeroTool (per-tenant reference cache)
   // and one auth resolver.
-  const xeroTool = createXeroTool(logger);
+  const xeroTool = createXeroTool(logger, processLog);
   const resolveXeroAuth = createResolveXeroAuth(
     config.xero.token_endpoint_base_url,
   );
@@ -104,12 +108,20 @@ async function main(): Promise<void> {
       fetchAttachment: createFetchAttachment(),
       logger,
       onProgress,
+      processLog,
     },
     checkpointer,
   );
 
   const paymentGraph = buildPaymentGraph(
-    { llmService, xeroTool, resolveXeroAuth, logger, onProgress },
+    {
+      llmService,
+      xeroTool,
+      resolveXeroAuth,
+      logger,
+      onProgress,
+      processLog,
+    },
     checkpointer,
   );
 
@@ -126,12 +138,13 @@ async function main(): Promise<void> {
       fetchAttachment: createFetchAttachment(),
       logger,
       onProgress,
+      processLog,
     },
     checkpointer,
   );
 
   const reportGraph = buildReportGraph(
-    { llmService, xeroTool, resolveXeroAuth, logger, onProgress },
+    { llmService, xeroTool, resolveXeroAuth, logger, onProgress, processLog },
     checkpointer,
   );
 
@@ -142,7 +155,7 @@ async function main(): Promise<void> {
     expense: expenseGraph as unknown as RunnableGraph,
     report: reportGraph as unknown as RunnableGraph,
   };
-  const runWorkflow = createWorkflowRunner({ graphs, logger });
+  const runWorkflow = createWorkflowRunner({ graphs, logger, processLog });
   const pausedWorkflow = createPausedWorkflowCheck(graphs);
 
   // The main assistant: owns the conversation (thread `assistant:<chatId>`) and
@@ -156,6 +169,7 @@ async function main(): Promise<void> {
       maxHistoryMessages: config.assistant.max_history_messages,
       logger,
       onProgress,
+      processLog,
     },
     checkpointer,
   ) as unknown as RunnableGraph;
@@ -174,6 +188,7 @@ async function main(): Promise<void> {
         assistantGraph,
         correlations,
         publishPolicy: config.assistant.publish_policy,
+        processLog,
       })
     : createLegacyHandler({
         kafka,
@@ -241,6 +256,8 @@ async function main(): Promise<void> {
     if (checkpointer instanceof FallbackCheckpointer) {
       await checkpointer.flushToPostgres();
     }
+    stopProcessLogRetention();
+    await processLog.close();
     await cache?.disconnect();
     process.exit(0);
   };

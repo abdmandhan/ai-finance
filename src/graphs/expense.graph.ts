@@ -12,6 +12,7 @@ import {
 import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { ExpenseState, type ExpenseStateType } from "./expense.state";
+import { traceGraphNode } from "./trace-node";
 
 export type ExpenseGraph = ReturnType<typeof buildExpenseGraph>;
 
@@ -31,13 +32,21 @@ export function buildExpenseGraph(
   deps: ExpenseDeps,
   checkpointer?: BaseCheckpointSaver,
 ) {
-  const parse = makeParseExpenseNode(deps);
-  const clarify = makeAskExpenseClarificationNode(deps);
-  const resolveAccounts = makeResolveBankAccountsNode(deps);
-  const approval = makeExpenseApprovalNode(deps);
-  const execute = makeExecuteExpenseNode(deps);
-  const attach = makeAttachExpenseFileNode(deps);
-  const finalize = makeFinalizeExpenseNode(deps);
+  const parse = traceGraphNode(deps, "expense", makeParseExpenseNode(deps));
+  const clarify = traceGraphNode(
+    deps,
+    "expense",
+    makeAskExpenseClarificationNode(deps),
+  );
+  const resolveAccounts = traceGraphNode(
+    deps,
+    "expense",
+    makeResolveBankAccountsNode(deps),
+  );
+  const approval = traceGraphNode(deps, "expense", makeExpenseApprovalNode(deps));
+  const execute = traceGraphNode(deps, "expense", makeExecuteExpenseNode(deps));
+  const attach = traceGraphNode(deps, "expense", makeAttachExpenseFileNode(deps));
+  const finalize = traceGraphNode(deps, "expense", makeFinalizeExpenseNode(deps));
 
   const graph = new StateGraph(ExpenseState)
     .addNode(parse.name, parse.node)

@@ -2,6 +2,15 @@
 format = "pretty" # "json" or "pretty"
 level = "info"
 
+[process_log]
+# Opt-in full process trace for debugging a chat turn. Server logs are emitted
+# when enabled; DB rows are stored in graph_process_logs when database.url exists.
+enabled = false
+store_db = true
+include_payloads = true
+retention_days = 14
+max_payload_chars = 4000
+
 [llm]
 # Chat models used by the planner / entity-extraction nodes, in three size tiers.
 # Shared defaults here; each tier may override url/api_key. model is

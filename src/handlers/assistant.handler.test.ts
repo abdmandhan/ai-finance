@@ -1,4 +1,4 @@
-import type { IKafkaService } from "@/services";
+import type { IKafkaService, IProcessLogService } from "@/services";
 import { AIMessage } from "@langchain/core/messages";
 import { Command } from "@langchain/langgraph";
 import { pino } from "pino";
@@ -27,6 +27,7 @@ function setup(
     graphState?: unknown;
     runOutcome?: unknown;
     publishPolicy?: "always_publish" | "workflow_only";
+    processLog?: IProcessLogService;
   } = {},
 ) {
   const publishOutbound = vi.fn(async (_msg: any) => {});
@@ -57,8 +58,25 @@ function setup(
     assistantGraph,
     correlations: createCorrelationStore(),
     publishPolicy: opts.publishPolicy,
+    processLog: opts.processLog,
   });
   return { handler, publishOutbound, runWorkflow, assistantGraph };
+}
+
+function processLog() {
+  return {
+    runWithContext: vi.fn(async (_ctx: unknown, fn: () => Promise<unknown>) =>
+      fn(),
+    ),
+    log: vi.fn(),
+    flush: vi.fn(),
+    close: vi.fn(),
+    cleanupExpired: vi.fn(),
+    startRetention: vi.fn(),
+  } as unknown as IProcessLogService & {
+    runWithContext: ReturnType<typeof vi.fn>;
+    log: ReturnType<typeof vi.fn>;
+  };
 }
 
 describe("assistant handler", () => {
@@ -83,6 +101,40 @@ describe("assistant handler", () => {
     expect(out.tenantId).toBe("tenant-1");
     expect(out.output.intent).toBe("ok");
     expect(out.output.answer).toContain("Accrual accounting");
+  });
+
+  it("records handler process log events for a fresh inbound turn", async () => {
+    const log = processLog();
+    const { handler } = setup({
+      processLog: log,
+      graphState: {
+        messages: [new AIMessage("Accrual accounting records income when earned.")],
+        outcome: null,
+      },
+    });
+
+    await handler(inbound("What is accrual accounting?"));
+
+    expect(log.runWithContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: "req-1",
+        chatId: "chat-1",
+        tenantId: "tenant-1",
+      }),
+      expect.any(Function),
+    );
+    expect(log.log).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "prompt.received" }),
+    );
+    expect(log.log).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "assistant.invoke" }),
+    );
+    expect(log.log).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "outbound.prepared" }),
+    );
+    expect(log.log).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "turn.finished" }),
+    );
   });
 
   it("suppresses fresh pure conversation when publish policy is workflow_only", async () => {

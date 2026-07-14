@@ -14,6 +14,7 @@ import {
 import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { InvoiceState, type InvoiceStateType } from "./invoice.state";
+import { traceGraphNode } from "./trace-node";
 
 export type InvoiceGraph = ReturnType<typeof buildInvoiceGraph>;
 
@@ -29,15 +30,35 @@ export function buildInvoiceGraph(
   deps: InvoiceDeps,
   checkpointer?: BaseCheckpointSaver,
 ) {
-  const parse = makeParseInvoiceNode(deps);
-  const clarify = makeAskInvoiceClarificationNode(deps);
-  const resolveContact = makeResolveXeroContactNode(deps);
-  const checkDuplicate = makeCheckDuplicateInvoiceNode(deps);
-  const createDraft = makeCreateDraftInvoiceNode(deps);
-  const attach = makeAttachInvoiceFileNode(deps);
-  const approval = makeInvoiceApprovalNode(deps);
-  const authorise = makeAuthoriseInvoiceNode(deps);
-  const finalize = makeFinalizeInvoiceNode(deps);
+  const parse = traceGraphNode(deps, "invoice", makeParseInvoiceNode(deps));
+  const clarify = traceGraphNode(
+    deps,
+    "invoice",
+    makeAskInvoiceClarificationNode(deps),
+  );
+  const resolveContact = traceGraphNode(
+    deps,
+    "invoice",
+    makeResolveXeroContactNode(deps),
+  );
+  const checkDuplicate = traceGraphNode(
+    deps,
+    "invoice",
+    makeCheckDuplicateInvoiceNode(deps),
+  );
+  const createDraft = traceGraphNode(
+    deps,
+    "invoice",
+    makeCreateDraftInvoiceNode(deps),
+  );
+  const attach = traceGraphNode(deps, "invoice", makeAttachInvoiceFileNode(deps));
+  const approval = traceGraphNode(deps, "invoice", makeInvoiceApprovalNode(deps));
+  const authorise = traceGraphNode(
+    deps,
+    "invoice",
+    makeAuthoriseInvoiceNode(deps),
+  );
+  const finalize = traceGraphNode(deps, "invoice", makeFinalizeInvoiceNode(deps));
 
   const graph = new StateGraph(InvoiceState)
     .addNode(parse.name, parse.node)

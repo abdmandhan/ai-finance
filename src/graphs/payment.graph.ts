@@ -11,6 +11,7 @@ import {
 import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { PaymentState, type PaymentStateType } from "./payment.state";
+import { traceGraphNode } from "./trace-node";
 
 export type PaymentGraph = ReturnType<typeof buildPaymentGraph>;
 
@@ -31,12 +32,20 @@ export function buildPaymentGraph(
   deps: PaymentDeps,
   checkpointer?: BaseCheckpointSaver,
 ) {
-  const parse = makeParsePaymentNode(deps);
-  const clarify = makeAskPaymentClarificationNode(deps);
-  const resolveTarget = makeResolvePaymentTargetNode(deps);
-  const approval = makePaymentApprovalNode(deps);
-  const execute = makeExecutePaymentNode(deps);
-  const finalize = makeFinalizePaymentNode(deps);
+  const parse = traceGraphNode(deps, "payment", makeParsePaymentNode(deps));
+  const clarify = traceGraphNode(
+    deps,
+    "payment",
+    makeAskPaymentClarificationNode(deps),
+  );
+  const resolveTarget = traceGraphNode(
+    deps,
+    "payment",
+    makeResolvePaymentTargetNode(deps),
+  );
+  const approval = traceGraphNode(deps, "payment", makePaymentApprovalNode(deps));
+  const execute = traceGraphNode(deps, "payment", makeExecutePaymentNode(deps));
+  const finalize = traceGraphNode(deps, "payment", makeFinalizePaymentNode(deps));
 
   const graph = new StateGraph(PaymentState)
     .addNode(parse.name, parse.node)

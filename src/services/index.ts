@@ -60,6 +60,19 @@ export {
   type ResolveEnablement,
 } from "./agent-enablement";
 export {
+  createProcessLogService,
+  ProcessLogService,
+  PROCESS_LOG_INDEX_DDL,
+  PROCESS_LOG_TABLE_DDL,
+  sanitizeForProcessLog,
+  setupProcessLogDb,
+  type IProcessLogService,
+  type ProcessLogContext,
+  type ProcessLogEntry,
+  type ProcessLogPool,
+  type ProcessLogPoolFactory,
+} from "./process-log.service";
+export {
   createFetchAttachment,
   type FetchAttachment,
   type FetchedAttachment,

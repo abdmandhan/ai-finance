@@ -1,0 +1,214 @@
+import type { ILogger } from "@/commons";
+import { describe, expect, it, vi } from "vitest";
+import {
+  PROCESS_LOG_INDEX_DDL,
+  PROCESS_LOG_TABLE_DDL,
+  ProcessLogService,
+  sanitizeForProcessLog,
+  setupProcessLogDb,
+  type ProcessLogPool,
+} from "./process-log.service";
+
+function logger() {
+  return {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    child: vi.fn(),
+  } as unknown as ILogger & {
+    info: ReturnType<typeof vi.fn>;
+    warn: ReturnType<typeof vi.fn>;
+    error: ReturnType<typeof vi.fn>;
+  };
+}
+
+function pool(query = vi.fn(async () => ({ rowCount: 0 }))) {
+  return {
+    query,
+    end: vi.fn(async () => {}),
+  } satisfies ProcessLogPool;
+}
+
+const enabledConfig = {
+  enabled: true,
+  store_db: true,
+  include_payloads: true,
+  retention_days: 14,
+  max_payload_chars: 4000,
+};
+
+describe("ProcessLogService", () => {
+  it("is a no-op when disabled", async () => {
+    const log = logger();
+    const svc = new ProcessLogService(
+      { ...enabledConfig, enabled: false },
+      log,
+      "",
+    );
+
+    await svc.runWithContext({ chatId: "chat-1" }, async () => {
+      svc.log({ event: "prompt.received" });
+    });
+
+    expect(log.info).not.toHaveBeenCalled();
+  });
+
+  it("emits trace context with increasing sequence numbers", async () => {
+    const log = logger();
+    const svc = new ProcessLogService(
+      { ...enabledConfig, store_db: false },
+      log,
+      "",
+    );
+
+    await svc.runWithContext(
+      { chatId: "chat-1", requestId: "req-1", tenantId: "tenant-1" },
+      async () => {
+        svc.log({ event: "prompt.received" });
+        svc.log({ event: "assistant.invoke" });
+      },
+    );
+
+    expect(log.info.mock.calls[0][0]).toMatchObject({
+      processLog: true,
+      traceId: "req-1",
+      chatId: "chat-1",
+      tenantId: "tenant-1",
+      seq: 1,
+      event: "prompt.received",
+    });
+    expect(log.info.mock.calls[1][0]).toMatchObject({
+      seq: 2,
+      event: "assistant.invoke",
+    });
+  });
+
+  it("stores rows by chat_id without blocking callers", async () => {
+    const log = logger();
+    const query = vi.fn(async () => ({ rowCount: 1 }));
+    const svc = new ProcessLogService(enabledConfig, log, "postgres://db", () =>
+      pool(query),
+    );
+
+    await svc.runWithContext(
+      { chatId: "chat-2", requestId: "req-2" },
+      async () => {
+        svc.log({ event: "tool.call", payload: { ok: true } });
+      },
+    );
+    await svc.flush();
+
+    expect(query).toHaveBeenCalledOnce();
+    expect(query.mock.calls[0][0]).toContain("INSERT INTO graph_process_logs");
+    expect(query.mock.calls[0][1]).toContain("chat-2");
+  });
+
+  it("creates storage and retries once when the process log table is missing", async () => {
+    const log = logger();
+    let insertAttempts = 0;
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("INSERT INTO graph_process_logs")) {
+        insertAttempts += 1;
+        if (insertAttempts === 1) {
+          throw Object.assign(
+            new Error('relation "graph_process_logs" does not exist'),
+            { code: "42P01" },
+          );
+        }
+      }
+      return { rowCount: 1 };
+    });
+    const svc = new ProcessLogService(enabledConfig, log, "postgres://db", () =>
+      pool(query),
+    );
+
+    await svc.runWithContext({ chatId: "chat-missing-table" }, async () => {
+      svc.log({ event: "prompt.received" });
+    });
+    await svc.flush();
+
+    const sqlCalls = query.mock.calls.map(([sql]) => sql);
+    expect(insertAttempts).toBe(2);
+    expect(sqlCalls).toContain(PROCESS_LOG_TABLE_DDL);
+    for (const sql of PROCESS_LOG_INDEX_DDL) {
+      expect(sqlCalls).toContain(sql);
+    }
+    expect(log.error).not.toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      "graph process log insert failed",
+    );
+  });
+
+  it("redacts secrets and truncates large payloads", () => {
+    const out = sanitizeForProcessLog(
+      {
+        authorization: "Bearer token",
+        nested: { accessToken: "secret-token", value: "ok" },
+        bytes: new Uint8Array([1, 2, 3]),
+        long: "x".repeat(100),
+      },
+      80,
+    ) as { truncated: boolean; preview: string };
+
+    expect(out.truncated).toBe(true);
+    expect(out.preview).toContain("[redacted]");
+    expect(out.preview).not.toContain("secret-token");
+  });
+
+  it("logs DB insert failures without throwing", async () => {
+    const log = logger();
+    const query = vi.fn(async () => {
+      throw new Error("db down");
+    });
+    const svc = new ProcessLogService(enabledConfig, log, "postgres://db", () =>
+      pool(query),
+    );
+
+    await svc.runWithContext({ chatId: "chat-3" }, async () => {
+      expect(() => svc.log({ event: "prompt.received" })).not.toThrow();
+    });
+    await svc.flush();
+
+    expect(log.error).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      "graph process log insert failed",
+    );
+  });
+
+  it("cleans up expired rows using configured retention days", async () => {
+    const log = logger();
+    const query = vi.fn(async () => ({ rowCount: 2 }));
+    const svc = new ProcessLogService(
+      { ...enabledConfig, retention_days: 30 },
+      log,
+      "postgres://db",
+      () => pool(query),
+    );
+
+    await svc.cleanupExpired();
+
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("DELETE FROM graph_process_logs"),
+      [30],
+    );
+    expect(log.info).toHaveBeenCalledWith(
+      { deleted: 2 },
+      "graph process log retention cleanup complete",
+    );
+  });
+
+  it("sets up the process log table and indexes idempotently", async () => {
+    const log = logger();
+    const p = pool();
+
+    await setupProcessLogDb("postgres://db", log, () => p);
+
+    expect(p.query).toHaveBeenCalledTimes(1 + PROCESS_LOG_INDEX_DDL.length);
+    expect(p.query).toHaveBeenCalledWith(PROCESS_LOG_TABLE_DDL);
+    for (const sql of PROCESS_LOG_INDEX_DDL) {
+      expect(p.query).toHaveBeenCalledWith(sql);
+      expect(sql).toContain("IF NOT EXISTS");
+    }
+    expect(p.end).toHaveBeenCalledOnce();
+  });
+});

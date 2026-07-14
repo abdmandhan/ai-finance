@@ -20,6 +20,23 @@ const configSchema = z.object({
         .default("info"),
     })
     .default({ format: "pretty", level: "info" }),
+  process_log: z
+    .object({
+      // Opt-in debug trace for one inbound turn. Writes server logs and,
+      // when configured, redacted rows into Postgres for later chat_id lookup.
+      enabled: z.boolean().default(false),
+      store_db: z.boolean().default(true),
+      include_payloads: z.boolean().default(true),
+      retention_days: z.number().int().positive().default(14),
+      max_payload_chars: z.number().int().min(100).default(4000),
+    })
+    .default({
+      enabled: false,
+      store_db: true,
+      include_payloads: true,
+      retention_days: 14,
+      max_payload_chars: 4000,
+    }),
   llm: z
     .object({
       // Shared defaults; each size tier may override. `model` is "provider:model"

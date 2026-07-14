@@ -14,6 +14,7 @@ import {
 } from "langchain";
 import { initChatModel } from "langchain/chat_models/universal";
 import type { z } from "zod";
+import type { IProcessLogService } from "./process-log.service";
 
 export type ModelSize = "small" | "medium" | "large";
 
@@ -88,6 +89,7 @@ export class LlmService implements ILlmService {
   constructor(
     private readonly config: Config["llm"],
     private readonly logger: ILogger,
+    private readonly processLog?: IProcessLogService,
   ) {
     this.logger = logger.child({ service: "LlmService" });
   }
@@ -142,6 +144,19 @@ export class LlmService implements ILlmService {
     const agentMessages =
       typeof messages === "string" ? [new HumanMessage(messages)] : messages;
     const finalMessages = mergeSystemMessages(agentMessages);
+    const started = Date.now();
+    this.processLog?.log({
+      event: "assistant.model_call",
+      stage: "llm.invoke.start",
+      tool: "llm.invoke",
+      payload: {
+        modelSize,
+        messageCount: finalMessages.length,
+        toolNames: options?.tools?.map((t) => t.name) ?? [],
+        responseFormat: Boolean(options?.responseFormat),
+        messages: describeMessages(finalMessages),
+      },
+    });
 
     let result: Awaited<ReturnType<typeof agent.invoke>>;
     try {
@@ -153,6 +168,14 @@ export class LlmService implements ILlmService {
       // via their structuredResponse checks.
       if (err instanceof TypeError) {
         this.logger.error({ err }, "LLM invocation failed with TypeError");
+        this.processLog?.log({
+          event: "assistant.model_call",
+          stage: "llm.invoke.end",
+          tool: "llm.invoke",
+          status: "type_error",
+          durationMs: Date.now() - started,
+          error: err,
+        });
         return {
           messages: [],
           structuredResponse: undefined,
@@ -161,9 +184,41 @@ export class LlmService implements ILlmService {
       } else if (err instanceof StructuredOutputParsingError) {
         // Structured output parsing failed — retry with toolStrategy which
         // forces structured output via a synthetic tool call.
-        return this.invokeWithToolStrategy(model, finalMessages, options);
+        this.processLog?.log({
+          event: "assistant.model_call",
+          stage: "llm.invoke.retry_tool_strategy",
+          tool: "llm.invoke",
+          status: "retry",
+          durationMs: Date.now() - started,
+          error: err,
+        });
+        const retry = await this.invokeWithToolStrategy(
+          model,
+          finalMessages,
+          options,
+        );
+        this.processLog?.log({
+          event: "assistant.model_call",
+          stage: "llm.invoke.end",
+          tool: "llm.invoke",
+          status: retry.structuredResponse ? "ok" : "no_structured_response",
+          durationMs: Date.now() - started,
+          payload: {
+            structuredResponse: retry.structuredResponse,
+            lastMessage: describeMessage(retry.lastMessage),
+          },
+        });
+        return retry;
       } else {
         // Other errors (network, auth, rate-limit) — rethrow so callers retry.
+        this.processLog?.log({
+          event: "assistant.model_call",
+          stage: "llm.invoke.error",
+          tool: "llm.invoke",
+          status: "error",
+          durationMs: Date.now() - started,
+          error: err,
+        });
         throw err;
       }
     }
@@ -201,11 +256,24 @@ export class LlmService implements ILlmService {
       }
     }
 
-    return {
+    const out = {
       messages: result.messages,
       structuredResponse,
       lastMessage: lastAiMessage,
     };
+    this.processLog?.log({
+      event: "assistant.model_call",
+      stage: "llm.invoke.end",
+      tool: "llm.invoke",
+      status: structuredResponse ? "ok" : "no_structured_response",
+      durationMs: Date.now() - started,
+      payload: {
+        structuredResponse,
+        lastMessage: describeMessage(lastAiMessage),
+        messageCount: result.messages.length,
+      },
+    });
+    return out;
   }
 
   async extract<T extends Record<string, any>>(
@@ -230,12 +298,46 @@ export class LlmService implements ILlmService {
     options?: { tools?: StructuredToolInterface[]; size?: ModelSize },
   ): Promise<AIMessage> {
     await this.ensureInitialized();
-    const model = this.models[options?.size ?? "large"]!;
+    const size = options?.size ?? "large";
+    const model = this.models[size]!;
     const finalMessages = mergeSystemMessages(messages);
     const runnable = options?.tools?.length
       ? model.bindTools(options.tools)
       : model;
-    return (await runnable.invoke(finalMessages)) as AIMessage;
+    const started = Date.now();
+    this.processLog?.log({
+      event: "assistant.model_call",
+      stage: "llm.chat.start",
+      tool: "llm.chat",
+      payload: {
+        modelSize: size,
+        messageCount: finalMessages.length,
+        toolNames: options?.tools?.map((t) => t.name) ?? [],
+        messages: describeMessages(finalMessages),
+      },
+    });
+    try {
+      const response = (await runnable.invoke(finalMessages)) as AIMessage;
+      this.processLog?.log({
+        event: "assistant.model_call",
+        stage: "llm.chat.end",
+        tool: "llm.chat",
+        status: "ok",
+        durationMs: Date.now() - started,
+        payload: { response: describeMessage(response) },
+      });
+      return response;
+    } catch (error) {
+      this.processLog?.log({
+        event: "assistant.model_call",
+        stage: "llm.chat.error",
+        tool: "llm.chat",
+        status: "error",
+        durationMs: Date.now() - started,
+        error,
+      });
+      throw error;
+    }
   }
 
   private async invokeWithToolStrategy<
@@ -289,9 +391,29 @@ function mergeSystemMessages(messages: BaseMessage[]): BaseMessage[] {
   return systemText ? [new SystemMessage(systemText), ...nonSystem] : nonSystem;
 }
 
+function describeMessage(message: BaseMessage): unknown {
+  return {
+    type: message.getType(),
+    content: message.content,
+    toolCalls:
+      message instanceof AIMessage
+        ? message.tool_calls?.map((call) => ({
+            name: call.name,
+            args: call.args,
+            id: call.id,
+          }))
+        : undefined,
+  };
+}
+
+function describeMessages(messages: BaseMessage[]): unknown[] {
+  return messages.map((message) => describeMessage(message));
+}
+
 export function createLlmService(
   config: Config["llm"],
   logger: ILogger,
+  processLog?: IProcessLogService,
 ): ILlmService {
-  return new LlmService(config, logger);
+  return new LlmService(config, logger, processLog);
 }

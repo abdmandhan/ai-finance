@@ -2,6 +2,7 @@ import type { ILogger } from "@/commons";
 import type { InterruptPayload } from "@/nodes";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { AgentEnablement } from "./agent-enablement";
+import type { IProcessLogService } from "./process-log.service";
 
 /** The strict workflows this service can run. Each one is a compiled LangGraph graph. */
 export type Workflow = "schedule" | "invoice" | "payment" | "expense" | "report";
@@ -129,6 +130,7 @@ export type RunWorkflow = (
 export function createWorkflowRunner(deps: {
   graphs: Record<Workflow, RunnableGraph>;
   logger: ILogger;
+  processLog?: IProcessLogService;
 }): RunWorkflow {
   return async function runWorkflow(workflow, chatId, input) {
     // Explicit config only — never the parent's — so the workflow keeps its own
@@ -136,6 +138,13 @@ export function createWorkflowRunner(deps: {
     // invokes (assistant tool calls) deliver it as a GraphInterrupt throw.
     let raw: { result?: GraphResult } = {};
     let pending: InterruptPayload | null = null;
+    const started = Date.now();
+    deps.processLog?.log({
+      event: "workflow.run.start",
+      workflow,
+      status: "start",
+      payload: { chatId, input },
+    });
     try {
       raw = (await deps.graphs[workflow].invoke(input, {
         configurable: { thread_id: threadKey(workflow, chatId) },
@@ -143,9 +152,25 @@ export function createWorkflowRunner(deps: {
       pending = extractInterrupt(raw);
     } catch (err) {
       pending = interruptFromError(err);
-      if (!pending) throw err;
+      if (!pending) {
+        deps.processLog?.log({
+          event: "workflow.run.error",
+          workflow,
+          status: "error",
+          durationMs: Date.now() - started,
+          error: err,
+        });
+        throw err;
+      }
     }
     if (pending?.kind === "approval") {
+      deps.processLog?.log({
+        event: "workflow.run.end",
+        workflow,
+        status: "approval",
+        durationMs: Date.now() - started,
+        payload: { interrupt: pending },
+      });
       return {
         kind: "approval",
         workflow,
@@ -154,13 +179,28 @@ export function createWorkflowRunner(deps: {
       };
     }
     if (pending) {
+      deps.processLog?.log({
+        event: "workflow.run.end",
+        workflow,
+        status: "clarification",
+        durationMs: Date.now() - started,
+        payload: { interrupt: pending },
+      });
       return { kind: "clarification", workflow, question: pending.message };
     }
-    return {
+    const outcome = {
       kind: "result",
       workflow,
       result: raw.result ?? { status: "failed", summary: "No result produced." },
-    };
+    } as const;
+    deps.processLog?.log({
+      event: "workflow.run.end",
+      workflow,
+      status: outcome.result.status,
+      durationMs: Date.now() - started,
+      payload: { outcome },
+    });
+    return outcome;
   };
 }
 

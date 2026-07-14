@@ -11,6 +11,7 @@ import {
 import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { ReportState, type ReportStateType } from "./report.state";
+import { traceGraphNode } from "./trace-node";
 
 export type ReportGraph = ReturnType<typeof buildReportGraph>;
 
@@ -30,12 +31,24 @@ export function buildReportGraph(
   deps: ReportDeps,
   checkpointer?: BaseCheckpointSaver,
 ) {
-  const parse = makeParseReportNode(deps);
-  const clarify = makeAskReportClarificationNode(deps);
-  const resolvePeriod = makeResolveReportPeriodNode(deps);
-  const fetchData = makeFetchReportDataNode(deps);
-  const compose = makeComposeReportAnswerNode(deps);
-  const finalize = makeFinalizeReportNode(deps);
+  const parse = traceGraphNode(deps, "report", makeParseReportNode(deps));
+  const clarify = traceGraphNode(
+    deps,
+    "report",
+    makeAskReportClarificationNode(deps),
+  );
+  const resolvePeriod = traceGraphNode(
+    deps,
+    "report",
+    makeResolveReportPeriodNode(deps),
+  );
+  const fetchData = traceGraphNode(deps, "report", makeFetchReportDataNode(deps));
+  const compose = traceGraphNode(
+    deps,
+    "report",
+    makeComposeReportAnswerNode(deps),
+  );
+  const finalize = traceGraphNode(deps, "report", makeFinalizeReportNode(deps));
 
   const graph = new StateGraph(ReportState)
     .addNode(parse.name, parse.node)

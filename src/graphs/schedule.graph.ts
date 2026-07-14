@@ -18,6 +18,7 @@ import {
 import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { ScheduleState, type ScheduleStateType } from "./schedule.state";
+import { traceGraphNode } from "./trace-node";
 
 export type ScheduleGraph = ReturnType<typeof buildScheduleGraph>;
 
@@ -35,19 +36,47 @@ export function buildScheduleGraph(
   deps: ScheduleDeps,
   checkpointer?: BaseCheckpointSaver,
 ) {
-  const parseIntent = makeParseIntentNode(deps);
-  const askClarification = makeAskClarificationNode(deps);
-  const resolveContact = makeResolveContactNode(deps);
-  const searchCalendar = makeSearchCalendarNode(deps);
-  const lookupSchedule = makeLookupScheduleNode(deps);
-  const findSlot = makeFindSlotNode(deps);
-  const awaitResolution = makeAwaitResolutionNode(deps);
-  const createEvent = makeCreateEventNode(deps);
-  const saveContact = makeSaveContactNode(deps);
-  const savePreference = makeSavePreferenceNode(deps);
-  const listPreferences = makeListPreferencesNode(deps);
-  const notify = makeNotifyNode(deps);
-  const finalize = makeFinalizeNode(deps);
+  const parseIntent = traceGraphNode(deps, "schedule", makeParseIntentNode(deps));
+  const askClarification = traceGraphNode(
+    deps,
+    "schedule",
+    makeAskClarificationNode(deps),
+  );
+  const resolveContact = traceGraphNode(
+    deps,
+    "schedule",
+    makeResolveContactNode(deps),
+  );
+  const searchCalendar = traceGraphNode(
+    deps,
+    "schedule",
+    makeSearchCalendarNode(deps),
+  );
+  const lookupSchedule = traceGraphNode(
+    deps,
+    "schedule",
+    makeLookupScheduleNode(deps),
+  );
+  const findSlot = traceGraphNode(deps, "schedule", makeFindSlotNode(deps));
+  const awaitResolution = traceGraphNode(
+    deps,
+    "schedule",
+    makeAwaitResolutionNode(deps),
+  );
+  const createEvent = traceGraphNode(deps, "schedule", makeCreateEventNode(deps));
+  const saveContact = traceGraphNode(deps, "schedule", makeSaveContactNode(deps));
+  const savePreference = traceGraphNode(
+    deps,
+    "schedule",
+    makeSavePreferenceNode(deps),
+  );
+  const listPreferences = traceGraphNode(
+    deps,
+    "schedule",
+    makeListPreferencesNode(deps),
+  );
+  const notify = traceGraphNode(deps, "schedule", makeNotifyNode(deps));
+  const finalize = traceGraphNode(deps, "schedule", makeFinalizeNode(deps));
 
   const graph = new StateGraph(ScheduleState)
     .addNode(parseIntent.name, parseIntent.node)

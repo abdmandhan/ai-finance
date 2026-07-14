@@ -15,6 +15,13 @@ describe("config schema", () => {
     expect(config.worker.concurrency).toBe(10);
     expect(config.worker.max_attempts).toBe(3);
     expect(config.assistant.publish_policy).toBe("always_publish");
+    expect(config.process_log).toEqual({
+      enabled: false,
+      store_db: true,
+      include_payloads: true,
+      retention_days: 14,
+      max_payload_chars: 4000,
+    });
     expect(config.kafka.topics.inbound_error).toBe("chat.inbound.error");
   });
 
@@ -46,6 +53,38 @@ describe("config schema", () => {
       configUtils.configSchema.parse({
         kafka: {},
         assistant: { publish_policy: "sometimes" },
+      }),
+    ).toThrow();
+  });
+
+  it("accepts full process log config", () => {
+    const config = configUtils.configSchema.parse({
+      kafka: {},
+      process_log: {
+        enabled: true,
+        store_db: true,
+        include_payloads: true,
+        retention_days: 30,
+        max_payload_chars: 1000,
+      },
+    });
+
+    expect(config.process_log.enabled).toBe(true);
+    expect(config.process_log.retention_days).toBe(30);
+    expect(config.process_log.max_payload_chars).toBe(1000);
+  });
+
+  it("rejects invalid process log retention and payload limits", () => {
+    expect(() =>
+      configUtils.configSchema.parse({
+        kafka: {},
+        process_log: { retention_days: 0 },
+      }),
+    ).toThrow();
+    expect(() =>
+      configUtils.configSchema.parse({
+        kafka: {},
+        process_log: { max_payload_chars: 10 },
       }),
     ).toThrow();
   });

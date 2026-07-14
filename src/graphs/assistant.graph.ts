@@ -7,6 +7,7 @@ import {
 import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { AssistantState, type AssistantStateType } from "./assistant.state";
+import { traceGraphNode } from "./trace-node";
 
 export type AssistantGraph = ReturnType<typeof buildAssistantGraph>;
 
@@ -29,8 +30,16 @@ export function buildAssistantGraph(
   deps: AssistantDeps,
   checkpointer?: BaseCheckpointSaver,
 ) {
-  const callModel = makeAssistantCallModelNode(deps);
-  const executeTools = makeAssistantExecuteToolsNode(deps);
+  const callModel = traceGraphNode(
+    deps,
+    "assistant",
+    makeAssistantCallModelNode(deps),
+  );
+  const executeTools = traceGraphNode(
+    deps,
+    "assistant",
+    makeAssistantExecuteToolsNode(deps),
+  );
 
   const graph = new StateGraph(AssistantState)
     .addNode(callModel.name, callModel.node)

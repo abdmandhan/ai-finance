@@ -1,6 +1,6 @@
 import type { AssistantDeps } from "@/nodes";
 import type { AssistantWorkflowOutcome } from "@/schemas";
-import type { ILlmService } from "@/services";
+import type { ILlmService, IProcessLogService } from "@/services";
 import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import { MemorySaver } from "@langchain/langgraph";
 import { pino } from "pino";
@@ -18,6 +18,7 @@ function buildGraph(
   opts: {
     replies?: AIMessage[];
     outcomes?: AssistantWorkflowOutcome[];
+    processLog?: IProcessLogService;
   } = {},
 ) {
   const logger = pino({ level: "silent" });
@@ -35,6 +36,7 @@ function buildGraph(
     defaultTimezone: "UTC",
     maxHistoryMessages: 30,
     logger,
+    processLog: opts.processLog,
   };
   return {
     graph: buildAssistantGraph(deps, new MemorySaver()),
@@ -58,6 +60,12 @@ function baseInput(over: Record<string, unknown> = {}) {
 }
 
 const config = (thread: string) => ({ configurable: { thread_id: thread } });
+
+function processLog() {
+  return {
+    log: vi.fn(),
+  } as unknown as IProcessLogService & { log: ReturnType<typeof vi.fn> };
+}
 
 describe("assistant graph", () => {
   it("answers a general question directly — no tool call", async () => {
@@ -91,12 +99,14 @@ describe("assistant graph", () => {
         eventId: "ev-1",
       },
     };
+    const log = processLog();
     const { graph, runWorkflow } = buildGraph({
       replies: [
         toolCallMessage("schedule_meeting", "Meet Sarah tomorrow 10am"),
         new AIMessage("Done — I booked the meeting with Sarah."),
       ],
       outcomes: [outcome],
+      processLog: log,
     });
 
     const result: any = await graph.invoke(
@@ -118,6 +128,21 @@ describe("assistant graph", () => {
     const toolMsg = result.messages.find((m: any) => m instanceof ToolMessage);
     expect(JSON.parse(toolMsg.content).status).toBe("created");
     expect(result.messages.at(-1).content).toContain("booked");
+    expect(log.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "assistant.tool_selected",
+        workflow: "schedule",
+        tool: "schedule_meeting",
+      }),
+    );
+    expect(log.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "assistant.tool_result",
+        workflow: "schedule",
+        tool: "schedule_meeting",
+        status: "result",
+      }),
+    );
   });
 
   it("withholds tools on the relay turn after a workflow pauses", async () => {

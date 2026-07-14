@@ -1,10 +1,11 @@
 import type { ILogger } from "@/commons";
 import type { ResumeInput } from "@/nodes";
-import type { AssistantWorkflowOutcome } from "@/schemas";
+import type { AssistantWorkflowOutcome, InboundMessage } from "@/schemas";
 import { inboundMessageSchema } from "@/schemas";
 import type {
   IAuditService,
   IKafkaService,
+  IProcessLogService,
   ResolveEnablement,
   RunnableGraph,
   RunWorkflow,
@@ -35,6 +36,7 @@ export interface AssistantHandlerDeps {
   assistantGraph: RunnableGraph;
   correlations: CorrelationStore;
   publishPolicy?: AssistantPublishPolicy;
+  processLog?: IProcessLogService;
 }
 
 /** Text of the last AI message in a graph result state. */
@@ -83,6 +85,7 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
     assistantGraph,
     correlations,
     publishPolicy = "always_publish",
+    processLog,
   } = deps;
 
   async function publish(
@@ -90,6 +93,12 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
     outcome: AssistantWorkflowOutcome | null,
     answer: string,
   ): Promise<void> {
+    processLog?.log({
+      event: "outbound.prepared",
+      stage: "handler",
+      status: outcome?.kind ?? "conversation",
+      payload: { outcome, answer },
+    });
     await kafka.publishOutbound({
       ...correlations.baseOutbound(chatId),
       content: [{ type: "text", text: answer }],
@@ -110,6 +119,18 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
     const runConfig = {
       configurable: { thread_id: `assistant:${input.chatId}` },
     };
+    const started = Date.now();
+    processLog?.log({
+      event: "assistant.invoke",
+      stage: "handler",
+      status: "start",
+      payload: {
+        humanText: input.humanText,
+        attachments: input.attachments,
+        enablement: input.enablement,
+        workflowReport: input.workflowReport,
+      },
+    });
     // Reset the checkpointed step budget each turn (stepCount is an
     // accumulator) — otherwise the max-steps cap builds up across turns and
     // eventually bricks the chat.
@@ -117,24 +138,43 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
       values?: { stepCount?: number };
     };
     const priorSteps = prior?.values?.stepCount ?? 0;
-    const state = (await assistantGraph.invoke(
-      {
-        messages: [new HumanMessage(input.humanText)],
-        chatId: input.chatId,
-        tenantId: input.tenantId,
-        userId: input.userId,
-        attachments: input.attachments,
-        enablement: input.enablement,
-        workflowReport: input.workflowReport,
-        outcome: null,
-        stepCount: -priorSteps,
-      },
-      runConfig,
-    )) as { outcome?: AssistantWorkflowOutcome | null };
-    return {
-      outcome: state.outcome ?? null,
-      answer: lastAIText(state),
-    };
+    try {
+      const state = (await assistantGraph.invoke(
+        {
+          messages: [new HumanMessage(input.humanText)],
+          chatId: input.chatId,
+          tenantId: input.tenantId,
+          userId: input.userId,
+          attachments: input.attachments,
+          enablement: input.enablement,
+          workflowReport: input.workflowReport,
+          outcome: null,
+          stepCount: -priorSteps,
+        },
+        runConfig,
+      )) as { outcome?: AssistantWorkflowOutcome | null };
+      const out = {
+        outcome: state.outcome ?? null,
+        answer: lastAIText(state),
+      };
+      processLog?.log({
+        event: "assistant.invoke",
+        stage: "handler",
+        status: out.outcome?.kind ?? "conversation",
+        durationMs: Date.now() - started,
+        payload: out,
+      });
+      return out;
+    } catch (error) {
+      processLog?.log({
+        event: "assistant.invoke",
+        stage: "handler",
+        status: "error",
+        durationMs: Date.now() - started,
+        error,
+      });
+      throw error;
+    }
   }
 
   return async function handleInbound(raw: string): Promise<void> {
@@ -143,12 +183,59 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
     const text = inboundText(msg);
     correlations.remember(msg);
 
+    await (processLog?.runWithContext(
+      {
+        traceId: msg.requestId,
+        chatId,
+        requestId: msg.requestId,
+        tenantId: msg.tenantId,
+        messageId: msg.messageId,
+        userId: msg.createdBy,
+        provider: msg.provider,
+      },
+      async () => {
+        await handleInboundWithProcessLog(msg, chatId, text, raw);
+      },
+    ) ?? handleInboundWithProcessLog(msg, chatId, text, raw));
+  };
+
+  async function handleInboundWithProcessLog(
+    msg: InboundMessage,
+    chatId: string,
+    text: string,
+    raw: string,
+  ): Promise<void> {
     try {
       const started = Date.now();
+      const finish = (status: string, payload?: unknown) =>
+        processLog?.log({
+          event: "turn.finished",
+          stage: "handler",
+          status,
+          durationMs: Date.now() - started,
+          payload,
+        });
+
+      processLog?.log({
+        event: "prompt.received",
+        stage: "handler",
+        payload: {
+          raw,
+          text,
+          content: msg.content,
+          chatType: msg.chatType,
+          truncated: msg.truncated,
+        },
+      });
       // Per-tenant/per-member agent gate. Fail-closed (disabled on backend error).
       const enabled = await resolveEnablement({
         chatId,
         tenantId: msg.tenantId,
+      });
+      processLog?.log({
+        event: "enablement.resolved",
+        stage: "handler",
+        payload: { enabled },
       });
       const enablement = {
         scheduling: enabled.scheduling,
@@ -159,6 +246,12 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
       // Resume a paused workflow if one is waiting on this chat — gated too, so
       // disabling an agent mid-conversation stops its paused thread.
       const paused = await pausedWorkflow(chatId);
+      processLog?.log({
+        event: "paused_workflow.detected",
+        stage: "handler",
+        status: paused ?? "none",
+        payload: { workflow: paused },
+      });
       if (paused) {
         if (!enabled[enablementKeyOf[paused]]) {
           const disabled: AssistantWorkflowOutcome = {
@@ -167,12 +260,19 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
           };
           await publish(chatId, disabled, defaultAnswerFor(disabled));
           logger.info({ chatId, workflow: paused }, "agent disabled — gated");
+          finish("agent_disabled", { workflow: paused });
           return;
         }
         const resume: ResumeInput = {
           reply: text,
           approved: isAffirmative(text),
         };
+        processLog?.log({
+          event: "workflow.resume",
+          stage: "handler",
+          workflow: paused,
+          payload: { resume },
+        });
         const outcome = (await runWorkflow(
           paused,
           chatId,
@@ -183,6 +283,7 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
         // (exact approvalData contract, no rephrasing).
         if (outcome.kind !== "result") {
           await publish(chatId, outcome, defaultAnswerFor(outcome));
+          finish(outcome.kind, { outcome });
           return;
         }
 
@@ -203,6 +304,7 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
           status: outcome.result.status,
           durationMs: Date.now() - started,
         });
+        finish(outcome.result.status, { outcome });
         return;
       }
 
@@ -225,7 +327,8 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
         (outcome
           ? defaultAnswerFor(outcome)
           : "Sorry, I could not produce a reply.");
-      if (shouldPublishAssistantOutbound(publishPolicy, outcome)) {
+      const published = shouldPublishAssistantOutbound(publishPolicy, outcome);
+      if (published) {
         await publish(chatId, outcome, finalAnswer);
       } else {
         logger.info(
@@ -240,7 +343,14 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
           durationMs: Date.now() - started,
         });
       }
+      finish(outcome?.kind ?? "conversation", { outcome, published });
     } catch (err) {
+      processLog?.log({
+        event: "turn.failed",
+        stage: "handler",
+        status: "error",
+        error: err,
+      });
       logger.error({ err, chatId }, "assistant handler failed");
       const answer = "Sorry, something went wrong while handling your message.";
       await kafka
@@ -253,5 +363,5 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
           logger.error({ err: publishErr, chatId }, "error reply failed"),
         );
     }
-  };
+  }
 }
