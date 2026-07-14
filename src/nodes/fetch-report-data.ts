@@ -21,12 +21,16 @@ export type ReportData =
   | {
       kind: "documents";
       total: number;
+      totalsByCurrency: { currency?: string; total: number }[];
       count: number;
+      amountKind: "due" | "total";
       docs: {
         number?: string;
         contact?: string;
+        date?: string;
         dueDate?: string;
-        amountDue: number;
+        currency?: string;
+        amount: number;
       }[];
     }
   | { kind: "grouped"; groups: { label: string; value: number }[] }
@@ -39,15 +43,48 @@ export type ReportData =
       payables: number;
     };
 
-const docView = (i: XeroInvoiceDetail) => ({
+const docView = (
+  i: XeroInvoiceDetail,
+  baseCurrency: string | null | undefined,
+  amountOf: (doc: XeroInvoiceDetail) => number,
+) => ({
   number: i.InvoiceNumber,
   contact: i.Contact?.Name,
+  date: i.Date,
   dueDate: i.DueDate,
-  amountDue: i.AmountDue ?? 0,
+  currency: i.CurrencyCode ?? baseCurrency ?? undefined,
+  amount: amountOf(i),
 });
 
 const sumDue = (docs: XeroInvoiceDetail[]) =>
   docs.reduce((s, d) => s + (d.AmountDue ?? 0), 0);
+
+function documentData(
+  docs: XeroInvoiceDetail[],
+  baseCurrency: string | null | undefined,
+  amountKind: "due" | "total",
+): Extract<ReportData, { kind: "documents" }> {
+  const amountOf =
+    amountKind === "due"
+      ? (doc: XeroInvoiceDetail) => doc.AmountDue ?? 0
+      : (doc: XeroInvoiceDetail) => doc.Total ?? doc.AmountDue ?? 0;
+  const totals = new Map<string, number>();
+  for (const doc of docs) {
+    const currency = doc.CurrencyCode ?? baseCurrency ?? "";
+    totals.set(currency, (totals.get(currency) ?? 0) + amountOf(doc));
+  }
+  const totalsByCurrency = [...totals.entries()]
+    .map(([currency, total]) => ({ currency: currency || undefined, total }))
+    .sort((a, b) => (a.currency ?? "").localeCompare(b.currency ?? ""));
+  return {
+    kind: "documents",
+    total: docs.reduce((sum, doc) => sum + amountOf(doc), 0),
+    totalsByCurrency,
+    count: docs.length,
+    amountKind,
+    docs: docs.map((doc) => docView(doc, baseCurrency, amountOf)),
+  };
+}
 
 /**
  * Fetch and aggregate — all deterministic. P&L-style questions use Xero report
@@ -82,11 +119,24 @@ export function makeFetchReportDataNode(deps: ReportDeps) {
           report,
         };
       };
-      const openDocs = (extra: Partial<InvoiceQuery>) =>
+      const invoiceDateWindow = (enabled: boolean) =>
+        enabled && !period.defaulted
+          ? { dateFrom: period.from, dateTo: period.to }
+          : {};
+      const openDocs = (
+        extra: Partial<InvoiceQuery>,
+        opts: { dateWindow?: boolean } = {},
+      ) =>
         deps.xeroTool.getInvoices(auth, {
           statuses: ["AUTHORISED"],
           unpaidOnly: true,
           ...(state.minAmount != null ? { amountDueMin: state.minAmount } : {}),
+          ...invoiceDateWindow(opts.dateWindow ?? true),
+          ...extra,
+        });
+      const statusDocs = (extra: Partial<InvoiceQuery>) =>
+        deps.xeroTool.getInvoices(auth, {
+          ...invoiceDateWindow(true),
           ...extra,
         });
 
@@ -146,22 +196,70 @@ export function makeFetchReportDataNode(deps: ReportDeps) {
           }
           case "unpaid_invoices": {
             const docs = await openDocs({ type: "ACCREC" });
-            data = { kind: "documents", total: sumDue(docs), count: docs.length, docs: docs.map(docView) };
+            data = documentData(docs, state.baseCurrency, "due");
             break;
           }
           case "overdue_invoices": {
             const docs = await openDocs({ type: "ACCREC", dueBefore: today });
-            data = { kind: "documents", total: sumDue(docs), count: docs.length, docs: docs.map(docView) };
+            data = documentData(docs, state.baseCurrency, "due");
+            break;
+          }
+          case "draft_invoices": {
+            const docs = await statusDocs({
+              type: "ACCREC",
+              statuses: ["DRAFT"],
+            });
+            data = documentData(docs, state.baseCurrency, "total");
+            break;
+          }
+          case "paid_invoices": {
+            const docs = await statusDocs({
+              type: "ACCREC",
+              statuses: ["PAID"],
+            });
+            data = documentData(docs, state.baseCurrency, "total");
+            break;
+          }
+          case "voided_invoices": {
+            const docs = await statusDocs({
+              type: "ACCREC",
+              statuses: ["VOIDED"],
+            });
+            data = documentData(docs, state.baseCurrency, "total");
             break;
           }
           case "unpaid_bills": {
             const docs = await openDocs({ type: "ACCPAY" });
-            data = { kind: "documents", total: sumDue(docs), count: docs.length, docs: docs.map(docView) };
+            data = documentData(docs, state.baseCurrency, "due");
             break;
           }
           case "overdue_bills": {
             const docs = await openDocs({ type: "ACCPAY", dueBefore: today });
-            data = { kind: "documents", total: sumDue(docs), count: docs.length, docs: docs.map(docView) };
+            data = documentData(docs, state.baseCurrency, "due");
+            break;
+          }
+          case "draft_bills": {
+            const docs = await statusDocs({
+              type: "ACCPAY",
+              statuses: ["DRAFT"],
+            });
+            data = documentData(docs, state.baseCurrency, "total");
+            break;
+          }
+          case "paid_bills": {
+            const docs = await statusDocs({
+              type: "ACCPAY",
+              statuses: ["PAID"],
+            });
+            data = documentData(docs, state.baseCurrency, "total");
+            break;
+          }
+          case "voided_bills": {
+            const docs = await statusDocs({
+              type: "ACCPAY",
+              statuses: ["VOIDED"],
+            });
+            data = documentData(docs, state.baseCurrency, "total");
             break;
           }
           case "bills_due_soon": {
@@ -169,18 +267,18 @@ export function makeFetchReportDataNode(deps: ReportDeps) {
               type: "ACCPAY",
               dueAfter: period.from,
               dueBefore: period.to > period.from ? nextDay(period.to) : period.to,
-            });
-            data = { kind: "documents", total: sumDue(docs), count: docs.length, docs: docs.map(docView) };
+            }, { dateWindow: false });
+            data = documentData(docs, state.baseCurrency, "due");
             break;
           }
           case "receivables": {
             const docs = await openDocs({ type: "ACCREC" });
-            data = { kind: "documents", total: sumDue(docs), count: docs.length, docs: docs.map(docView) };
+            data = documentData(docs, state.baseCurrency, "due");
             break;
           }
           case "payables": {
             const docs = await openDocs({ type: "ACCPAY" });
-            data = { kind: "documents", total: sumDue(docs), count: docs.length, docs: docs.map(docView) };
+            data = documentData(docs, state.baseCurrency, "due");
             break;
           }
           case "expenses_by_supplier": {
@@ -235,8 +333,8 @@ export function makeFetchReportDataNode(deps: ReportDeps) {
             // overview
             const totals = await pnlTotals(period.from, period.to);
             const [rec, pay] = await Promise.all([
-              openDocs({ type: "ACCREC" }),
-              openDocs({ type: "ACCPAY" }),
+              openDocs({ type: "ACCREC" }, { dateWindow: false }),
+              openDocs({ type: "ACCPAY" }, { dateWindow: false }),
             ]);
             data = {
               kind: "overview",

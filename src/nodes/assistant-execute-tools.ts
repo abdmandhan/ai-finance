@@ -76,10 +76,10 @@ export const assistantWorkflowTools = [
     name: "financial_report",
     description: [
       "Answer READ-ONLY financial questions from the user's Xero data: spending, revenue,",
-      "profit, cash, balance sheet, unpaid/overdue invoices and bills, totals by",
-      "supplier/category/period. Call this directly for ANY question about the user's own",
+      "profit, cash, balance sheet, unpaid/overdue/draft/paid/voided invoices and bills,",
+      "totals by supplier/category/period. Call this directly for ANY question about the user's own",
       "figures — e.g. 'how much did we spend this month', 'what's our revenue this year',",
-      "'who owes us money', 'which bills are overdue', 'how are we doing'. Do NOT pre-ask",
+      "'who owes us money', 'which bills are overdue', 'show draft invoices', 'how are we doing'. Do NOT pre-ask",
       "which system (Xero is their accounting system) or how to define the period — the tool",
       "defaults to the current month and states its assumptions. It never creates or changes",
       "anything, so it needs no confirmation. NOT for general accounting concepts — answer",

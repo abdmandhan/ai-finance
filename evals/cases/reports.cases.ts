@@ -1,3 +1,4 @@
+import { baseSeed, openSalesInvoice } from "@/graphs/xero.test-utils";
 import type { EvalCase } from "./types";
 
 const WRITE_OPS = [
@@ -49,6 +50,58 @@ export const reportCases: EvalCase[] = [
       interrupt: "none",
       resultStatus: "answered",
       answerIncludes: ["INV-200"],
+      mustNotOps: [...WRITE_OPS],
+    },
+  },
+  {
+    id: "XERO-GRAPH-INV-001",
+    title: "'show me the draft invoices' routes to financial_report and lists ACCREC drafts",
+    level: "assistant",
+    seed: baseSeed({
+      invoices: [
+        openSalesInvoice({
+          InvoiceID: "draft-sales",
+          InvoiceNumber: "DRAFT-INV-1",
+          Status: "DRAFT",
+          Total: 250,
+          AmountDue: 0,
+          CurrencyCode: "USD",
+        }),
+      ],
+    }),
+    prompt: "Show me the draft invoices",
+    expect: {
+      interrupt: "none",
+      ops: {
+        invoiceQueries: {
+          match: { type: "ACCREC", statuses: ["DRAFT"] },
+        },
+      },
+      mustNotOps: [...WRITE_OPS],
+    },
+  },
+  {
+    id: "XERO-GRAPH-RPT-001",
+    title: "outstanding invoice answers use invoice currency",
+    level: "workflow",
+    workflow: "report",
+    seed: baseSeed({
+      organisation: { BaseCurrency: "IDR", Timezone: "Asia/Singapore" },
+      invoices: [
+        openSalesInvoice({
+          InvoiceID: "usd-sales",
+          InvoiceNumber: "INV-USD",
+          AmountDue: 1000,
+          CurrencyCode: "USD",
+        }),
+      ],
+    }),
+    prompt: "How much is outstanding?",
+    expect: {
+      interrupt: "none",
+      resultStatus: "answered",
+      answerIncludes: ["USD"],
+      answerExcludes: ["IDR 1,000"],
       mustNotOps: [...WRITE_OPS],
     },
   },

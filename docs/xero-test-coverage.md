@@ -11,6 +11,18 @@ covers it. Legend:
 - **np** — not planned yet: the capability itself is not built (graphs answer
   "unsupported" gracefully instead of guessing — XERO-AI-014).
 
+## Graph-local Xero parity slice
+
+These IDs track graph-owned parity cases that are not in the older root catalogue.
+
+| ID                 | Coverage                                                                                                              |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| XERO-GRAPH-INV-001 | det + eval: "show draft invoices" routes through `financial_report`, queries `ACCREC` + `DRAFT`, and performs no write |
+| XERO-GRAPH-BILL-001 | det: "show draft bills" queries `ACCPAY` + `DRAFT`, not sales invoices                                                |
+| XERO-GRAPH-INV-002 | det: paid and voided customer invoice lists query `PAID` / `VOIDED`; explicit periods apply invoice `Date` windows    |
+| XERO-GRAPH-RPT-001 | det + eval: outstanding invoice answers use each invoice's `CurrencyCode`, not the organisation base-currency fallback |
+| XERO-GRAPH-RPT-002 | det: mixed-currency invoice lists show per-currency subtotals and per-row currency, without conversion                 |
+
 ## 1. Connection & organisation (XERO-AUTH)
 
 | ID           | Coverage                                                                                                                                                                                                                                                                                                |
@@ -79,7 +91,7 @@ covers it. Legend:
 | INV-005 | **np** — discount lines not built                                                                                     |
 | INV-006 | det: CurrencyCode passthrough; org multicurrency validation **np**                                                    |
 | INV-007 | **np** — repeating invoices endpoint not built                                                                        |
-| INV-008 | covered by report graph (`unpaid_invoices`/`overdue_invoices` display, never emails)                                  |
+| INV-008 | det: report graph lists unpaid/overdue/draft/paid/voided sales invoices read-only; eval covers unpaid + draft lists   |
 | INV-009 | **np** — sending email reminders not built (and deliberately out of the AI's reach for now)                           |
 | INV-010 | det `XERO-INV-010`-equivalent (report tests); eval `XERO-INV-010`                                                     |
 | INV-011 | det/eval `XERO-INV-011` (receivables)                                                                                 |
@@ -101,7 +113,7 @@ covers it. Legend:
 | CON-004 | det `XERO-AI-003` (payment graph asks between candidates); invoice graph picks exact match first                  |
 | CON-005 | **np** — contact update workflow not built                                                                        |
 | CON-006 | det + eval `XERO-CON-006` (invoice_total_for_contact)                                                             |
-| CON-007 | det: `unpaid_invoices` grouped views (report tests)                                                               |
+| CON-007 | det: invoice/bill report lists include Xero contact names; unpaid/overdue/draft/paid/voided list coverage lives in report tests |
 | CON-008 | det `XERO-EXP-007` (supplier payments not double-counted — bill totals only)                                      |
 | CON-009 | det `XERO-ERR-003` (validation message extraction)                                                                |
 | CON-010 | det: per-document CurrencyCode (invoice graph) — no contact-wide currency assumption exists                       |
@@ -150,7 +162,7 @@ covers it. Legend:
 | RPT-010 | partial — needs monthly series (RPT-004)                                                                     |
 | RPT-011 | partial — `compareToPrevious` gives a two-period trend; longer trend **np**                                  |
 | RPT-012 | **np** — COGS section parsing not built                                                                      |
-| RPT-013 | **np** — transaction-currency totals not built (base currency only)                                          |
+| RPT-013 | partial — det `XERO-GRAPH-RPT-001/002`: invoice/bill document lists use transaction currency and per-currency subtotals; P&L/report endpoints still use Xero report currency |
 | RPT-014 | det: custom from/to period (`XERO-EXP-007` supplier test uses custom period; `periods.test.ts` XERO-RPT-014) |
 | RPT-015 | det + eval `XERO-RPT-015` (overview)                                                                         |
 | RPT-016 | partial — comparison shows account-level deltas; causal narrative deliberately not claimed                   |
@@ -236,7 +248,7 @@ covers it. Legend:
 | 10  | Partial invoice payment               | det `XERO-PAY-004/INV-014`                                             |
 | 11  | Simple spend-money                    | det + eval `XERO-EXP-002`                                              |
 | 12  | "How much did we spend this month?"   | det `XERO-RPT-001`; eval `XERO-EXP-004`                                |
-| 13  | "What invoices are overdue?"          | det `XERO-EXP-011`; eval `XERO-INV-010`                                |
+| 13  | "What invoices are overdue / draft?"  | det `XERO-EXP-011`, `XERO-GRAPH-INV-001/002`; eval `XERO-INV-010`, `XERO-GRAPH-INV-001` |
 | 14  | P&L question                          | det `XERO-RPT-003`; eval `XERO-RPT-015`                                |
 | 15  | Contact resolved without duplication  | eval `XERO-CON-003`; det exact-match test                              |
 | 16  | Confirmation before writes            | det approval-gate tests in all three write graphs                      |
@@ -244,3 +256,10 @@ covers it. Legend:
 | 18  | Rate limits                           | **np** (ERR-002)                                                       |
 | 19  | Duplicate webhooks                    | **oos** (App backend)                                                  |
 | 20  | Cross-tenant prevention               | **oos** (backend token minting; graph keys caches per tenant)          |
+
+## Remaining full-parity milestones
+
+- Purchase orders and quotes: add Xero tool methods, parse/workflow support, and catalogue coverage.
+- Batch operations: multi-invoice/bill payment, batch execution, and partial-failure reporting remain unbuilt.
+- Contact updates, account creation/selection, tracking categories, tax reports, and ledger drill-down are still staged follow-ups.
+- Reliability gaps remain for `Retry-After` handling and broader local-state reconciliation, which partly belongs in App/backend sync.

@@ -16,6 +16,14 @@ export function makeComposeReportAnswerNode(deps: ReportDeps) {
       const cur = state.baseCurrency ? `${state.baseCurrency} ` : "";
       const fmt = (n: number | undefined) =>
         n === undefined ? "n/a" : `${cur}${n.toLocaleString("en-US")}`;
+      const fmtMoney = (currency: string | undefined, n: number) =>
+        `${currency ? `${currency} ` : ""}${n.toLocaleString("en-US")}`;
+      const fmtCurrencyTotals = (
+        totals: { currency?: string; total: number }[],
+      ) =>
+        totals.length
+          ? totals.map((t) => fmtMoney(t.currency, t.total)).join(" and ")
+          : fmtMoney(state.baseCurrency ?? undefined, 0);
       const periodNote = period.defaulted
         ? `${period.label} (no period was given, so I used the current month)`
         : period.label;
@@ -73,20 +81,29 @@ export function makeComposeReportAnswerNode(deps: ReportDeps) {
             {
               unpaid_invoices: "unpaid customer invoices",
               overdue_invoices: "overdue customer invoices",
+              draft_invoices: "draft customer invoices",
+              paid_invoices: "paid customer invoices",
+              voided_invoices: "voided customer invoices",
               unpaid_bills: "unpaid bills",
               overdue_bills: "overdue bills",
+              draft_bills: "draft bills",
+              paid_bills: "paid bills",
+              voided_bills: "voided bills",
               bills_due_soon: `bills due ${period.label}`,
               receivables: "outstanding customer invoices (receivables)",
               payables: "outstanding bills (payables)",
             }[state.metric ?? ""] ?? "documents";
           const filterNote =
             state.minAmount != null ? ` over ${fmt(state.minAmount)}` : "";
+          const amountLabel =
+            data.amountKind === "due" ? "outstanding" : "total";
+          const rowLabel = data.amountKind === "due" ? " due" : "";
           lines.push(
-            `${data.count} ${noun}${filterNote}, totalling ${fmt(data.total)} outstanding:`,
+            `${data.count} ${noun}${filterNote}, totalling ${fmtCurrencyTotals(data.totalsByCurrency)} ${amountLabel}:`,
           );
           for (const d of data.docs.slice(0, 15))
             lines.push(
-              `- ${d.number ?? "?"} ${d.contact ?? ""}: ${fmt(d.amountDue)} due${d.dueDate ? ` (due ${d.dueDate})` : ""}`,
+              `- ${d.number ?? "?"} ${d.contact ?? ""}: ${fmtMoney(d.currency, d.amount)}${rowLabel}${d.dueDate ? ` (due ${d.dueDate})` : ""}`,
             );
           if (data.docs.length > 15)
             lines.push(`…and ${data.docs.length - 15} more.`);

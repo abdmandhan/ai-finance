@@ -37,7 +37,7 @@ export function makeParseReportNode(deps: ReportDeps) {
           result: {
             status: "failed" as const,
             summary:
-              "I can't answer that from Xero data. I can report on expenses, revenue, profit, cash, the balance sheet, and unpaid/overdue invoices and bills.",
+              "I can't answer that from Xero data. I can report on expenses, revenue, profit, cash, the balance sheet, and invoice or bill lists by status.",
           },
           _nextNode: REPORT_NODES.finalize,
         };

@@ -125,6 +125,16 @@ function config(threadId: string) {
   return { configurable: { thread_id: threadId } };
 }
 
+function expectNoWrites(xeroTool: StubXeroTool) {
+  expect(xeroTool.created).toHaveLength(0);
+  expect(xeroTool.createdPayments).toHaveLength(0);
+  expect(xeroTool.createdCreditNotes).toHaveLength(0);
+  expect(xeroTool.bankTransactions).toHaveLength(0);
+  expect(xeroTool.bankTransfers).toHaveLength(0);
+  expect(xeroTool.statusUpdates).toHaveLength(0);
+  expect(xeroTool.upserted).toHaveLength(0);
+}
+
 describe("report graph — P&L questions", () => {
   it("XERO-RPT-001: 'expenses this month' uses the full current calendar month and states the basis", async () => {
     const { graph, xeroTool } = buildGraph();
@@ -253,6 +263,263 @@ describe("report graph — P&L questions", () => {
 });
 
 describe("report graph — document queries", () => {
+  it("XERO-GRAPH-INV-001: lists draft customer invoices as read-only ACCREC DRAFT documents", async () => {
+    const { graph, xeroTool } = buildGraph({
+      intents: [intent({ metric: "draft_invoices", periodToken: "none" })],
+      seed: {
+        invoices: [
+          {
+            InvoiceID: "draft-sales",
+            InvoiceNumber: "DRAFT-INV-1",
+            Type: "ACCREC",
+            Status: "DRAFT",
+            Contact: { ContactID: "c-acme", Name: "Acme" },
+            Date: "2026-07-05",
+            DueDate: "2026-07-31",
+            Total: 250,
+            CurrencyCode: "USD",
+          },
+          {
+            InvoiceID: "draft-bill",
+            InvoiceNumber: "DRAFT-BILL-1",
+            Type: "ACCPAY",
+            Status: "DRAFT",
+            Contact: { ContactID: "c-sup", Name: "Supplier Co" },
+            Date: "2026-07-05",
+            Total: 500,
+            CurrencyCode: "USD",
+          },
+        ],
+      },
+    });
+    const done: any = await graph.invoke(
+      { threadId: "rpt-draft-inv", tenantId: "t1", userMessage: "show me the draft invoices" },
+      config("rpt-draft-inv"),
+    );
+
+    expect(done.result.status).toBe("answered");
+    expect(done.result.summary).toContain("DRAFT-INV-1");
+    expect(done.result.summary).toContain("Acme");
+    expect(done.result.summary).toContain("USD 250");
+    expect(done.result.summary).not.toContain("DRAFT-BILL-1");
+    expect(xeroTool.invoiceQueries[0]).toMatchObject({
+      type: "ACCREC",
+      statuses: ["DRAFT"],
+    });
+    expect(xeroTool.invoiceQueries[0].unpaidOnly).toBeUndefined();
+    expect(xeroTool.invoiceQueries[0].dateFrom).toBeUndefined();
+    expectNoWrites(xeroTool);
+  });
+
+  it("XERO-GRAPH-BILL-001: lists draft bills as read-only ACCPAY DRAFT documents", async () => {
+    const { graph, xeroTool } = buildGraph({
+      intents: [intent({ metric: "draft_bills", periodToken: "none" })],
+      seed: {
+        invoices: [
+          {
+            InvoiceID: "draft-sales",
+            InvoiceNumber: "DRAFT-INV-1",
+            Type: "ACCREC",
+            Status: "DRAFT",
+            Contact: { ContactID: "c-acme", Name: "Acme" },
+            Date: "2026-07-05",
+            Total: 250,
+          },
+          {
+            InvoiceID: "draft-bill",
+            InvoiceNumber: "DRAFT-BILL-1",
+            Type: "ACCPAY",
+            Status: "DRAFT",
+            Contact: { ContactID: "c-sup", Name: "Supplier Co" },
+            Date: "2026-07-05",
+            Total: 500,
+          },
+        ],
+      },
+    });
+    const done: any = await graph.invoke(
+      { threadId: "rpt-draft-bill", tenantId: "t1", userMessage: "show draft bills" },
+      config("rpt-draft-bill"),
+    );
+
+    expect(done.result.status).toBe("answered");
+    expect(done.result.summary).toContain("DRAFT-BILL-1");
+    expect(done.result.summary).not.toContain("DRAFT-INV-1");
+    expect(xeroTool.invoiceQueries[0]).toMatchObject({
+      type: "ACCPAY",
+      statuses: ["DRAFT"],
+    });
+    expect(xeroTool.invoiceQueries[0].unpaidOnly).toBeUndefined();
+    expectNoWrites(xeroTool);
+  });
+
+  it("XERO-GRAPH-INV-002: paid and voided invoice lists query their exact statuses", async () => {
+    const { graph, xeroTool } = buildGraph({
+      intents: [
+        intent({ metric: "paid_invoices", periodToken: "this_month" }),
+        intent({ metric: "voided_invoices", periodToken: "none" }),
+      ],
+      seed: {
+        invoices: [
+          {
+            InvoiceID: "paid-sales",
+            InvoiceNumber: "PAID-INV-1",
+            Type: "ACCREC",
+            Status: "PAID",
+            Contact: { ContactID: "c-acme", Name: "Acme" },
+            Date: "2026-07-05",
+            Total: 700,
+          },
+          {
+            InvoiceID: "void-sales",
+            InvoiceNumber: "VOID-INV-1",
+            Type: "ACCREC",
+            Status: "VOIDED",
+            Contact: { ContactID: "c-beta", Name: "Beta Ltd" },
+            Date: "2026-06-05",
+            Total: 900,
+          },
+        ],
+      },
+    });
+
+    const paid: any = await graph.invoke(
+      { threadId: "rpt-paid-inv", tenantId: "t1", userMessage: "show paid invoices this month" },
+      config("rpt-paid-inv"),
+    );
+    const voided: any = await graph.invoke(
+      { threadId: "rpt-void-inv", tenantId: "t1", userMessage: "show voided invoices" },
+      config("rpt-void-inv"),
+    );
+
+    expect(paid.result.summary).toContain("PAID-INV-1");
+    expect(voided.result.summary).toContain("VOID-INV-1");
+    expect(xeroTool.invoiceQueries[0]).toMatchObject({
+      type: "ACCREC",
+      statuses: ["PAID"],
+      dateFrom: "2026-07-01",
+      dateTo: "2026-07-31",
+    });
+    expect(xeroTool.invoiceQueries[1]).toMatchObject({
+      type: "ACCREC",
+      statuses: ["VOIDED"],
+    });
+    expect(xeroTool.invoiceQueries[1].dateFrom).toBeUndefined();
+    expectNoWrites(xeroTool);
+  });
+
+  it("XERO-GRAPH-RPT-001: outstanding invoice answers use invoice CurrencyCode, not base currency", async () => {
+    const { graph, xeroTool } = buildGraph({
+      intents: [intent({ metric: "unpaid_invoices", periodToken: "this_month" })],
+      seed: {
+        organisation: { BaseCurrency: "IDR", Timezone: "Asia/Singapore" },
+        invoices: [
+          {
+            InvoiceID: "usd-1",
+            InvoiceNumber: "INV-0003",
+            Type: "ACCREC",
+            Status: "AUTHORISED",
+            Contact: { ContactID: "c-acme", Name: "Acme" },
+            Date: "2026-07-01",
+            DueDate: "2026-07-31",
+            AmountDue: 250,
+            CurrencyCode: "USD",
+          },
+          {
+            InvoiceID: "usd-2",
+            InvoiceNumber: "INV-0005",
+            Type: "ACCREC",
+            Status: "AUTHORISED",
+            Contact: { ContactID: "c-acme", Name: "Acme" },
+            Date: "2026-07-05",
+            DueDate: "2026-07-31",
+            AmountDue: 555,
+            CurrencyCode: "USD",
+          },
+          {
+            InvoiceID: "usd-3",
+            InvoiceNumber: "INV-0007",
+            Type: "ACCREC",
+            Status: "AUTHORISED",
+            Contact: { ContactID: "c-acme", Name: "Acme" },
+            Date: "2026-07-07",
+            DueDate: "2026-07-31",
+            AmountDue: 666,
+            CurrencyCode: "USD",
+          },
+          {
+            InvoiceID: "usd-4",
+            InvoiceNumber: "INV-0015",
+            Type: "ACCREC",
+            Status: "AUTHORISED",
+            Contact: { ContactID: "c-acme", Name: "Acme" },
+            Date: "2026-07-09",
+            DueDate: "2026-07-31",
+            AmountDue: 821,
+            CurrencyCode: "USD",
+          },
+        ],
+      },
+    });
+    const done: any = await graph.invoke(
+      { threadId: "rpt-usd-outstanding", tenantId: "t1", userMessage: "How much is outstanding this month?" },
+      config("rpt-usd-outstanding"),
+    );
+
+    expect(done.result.summary).toContain("USD 2,292");
+    expect(done.result.summary).toContain("INV-0003 Acme: USD 250 due");
+    expect(done.result.summary).not.toContain("IDR 2,292");
+    expect(xeroTool.invoiceQueries[0]).toMatchObject({
+      type: "ACCREC",
+      statuses: ["AUTHORISED"],
+      unpaidOnly: true,
+      dateFrom: "2026-07-01",
+      dateTo: "2026-07-31",
+    });
+  });
+
+  it("XERO-GRAPH-RPT-002: mixed-currency invoice lists show per-currency subtotals", async () => {
+    const { graph } = buildGraph({
+      intents: [intent({ metric: "unpaid_invoices", periodToken: "this_month" })],
+      seed: {
+        organisation: { BaseCurrency: "IDR", Timezone: "Asia/Singapore" },
+        invoices: [
+          {
+            InvoiceID: "usd-1",
+            InvoiceNumber: "INV-USD",
+            Type: "ACCREC",
+            Status: "AUTHORISED",
+            Contact: { ContactID: "c-acme", Name: "Acme" },
+            Date: "2026-07-01",
+            AmountDue: 1000,
+            CurrencyCode: "USD",
+          },
+          {
+            InvoiceID: "idr-1",
+            InvoiceNumber: "INV-IDR",
+            Type: "ACCREC",
+            Status: "AUTHORISED",
+            Contact: { ContactID: "c-beta", Name: "Beta Ltd" },
+            Date: "2026-07-01",
+            AmountDue: 2000,
+            CurrencyCode: "IDR",
+          },
+        ],
+      },
+    });
+    const done: any = await graph.invoke(
+      { threadId: "rpt-mixed-currency", tenantId: "t1", userMessage: "How much is outstanding this month?" },
+      config("rpt-mixed-currency"),
+    );
+
+    expect(done.result.summary).toContain("IDR 2,000");
+    expect(done.result.summary).toContain("USD 1,000");
+    expect(done.result.summary).toContain("INV-IDR Beta Ltd: IDR 2,000 due");
+    expect(done.result.summary).toContain("INV-USD Acme: USD 1,000 due");
+    expect(done.result.summary).not.toContain("IDR 3,000");
+    expect(done.result.summary).not.toContain("USD 3,000");
+  });
+
   it("XERO-EXP-011 / XERO-RPT-019: overdue excludes PAID and VOIDED documents", async () => {
     const { graph, xeroTool } = buildGraph({
       intents: [intent({ metric: "overdue_invoices", periodToken: "none" })],
@@ -357,13 +624,7 @@ describe("report graph — read-only guarantee", () => {
     expect(done.__interrupt__).toBeUndefined();
     expect(done.result.status).toBe("answered");
     // Zero write records of any kind.
-    expect(xeroTool.created).toHaveLength(0);
-    expect(xeroTool.createdPayments).toHaveLength(0);
-    expect(xeroTool.createdCreditNotes).toHaveLength(0);
-    expect(xeroTool.bankTransactions).toHaveLength(0);
-    expect(xeroTool.bankTransfers).toHaveLength(0);
-    expect(xeroTool.statusUpdates).toHaveLength(0);
-    expect(xeroTool.upserted).toHaveLength(0);
+    expectNoWrites(xeroTool);
   });
 
   it("XERO-AI-014: unsupported questions explain the limitation", async () => {
