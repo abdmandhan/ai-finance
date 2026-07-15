@@ -27,8 +27,23 @@ export function makeResolveXeroContactNode(deps: InvoiceDeps) {
         const contact = exact ?? matches[0];
 
         if (contact) {
+          let fullContact = contact;
+          try {
+            fullContact =
+              (await deps.xeroTool.getContact(auth, contact.ContactID)) ??
+              contact;
+          } catch (err) {
+            deps.logger.warn(
+              { err, contactId: contact.ContactID },
+              "contact detail lookup failed",
+            );
+          }
           return {
-            contactId: contact.ContactID,
+            contactId: fullContact.ContactID,
+            customer: fullContact,
+            customerArBalance:
+              fullContact.ARBalance ??
+              fullContact.Balances?.AccountsReceivable?.Outstanding,
             _nextNode: INVOICE_NODES.checkDuplicate,
           };
         }

@@ -66,8 +66,12 @@ export function makeParseInvoiceNode(deps: InvoiceDeps) {
       );
       deps.logger.info({ extracted }, "parse-invoice result");
 
-      if (extracted.docType === "unsupported") {
+      if (
+        extracted.action === "unsupported" ||
+        extracted.docType === "unsupported"
+      ) {
         return {
+          action: extracted.action,
           docType: extracted.docType,
           result: {
             status: "failed" as const,
@@ -81,7 +85,33 @@ export function makeParseInvoiceNode(deps: InvoiceDeps) {
       const lineItems = extracted.lineItems.length
         ? extracted.lineItems
         : state.lineItems;
-      const missing = !contactName || !lineItems || lineItems.length === 0;
+      const action = extracted.action ?? state.action ?? "create_invoice";
+      const retainer = extracted.retainer ?? state.retainer ?? null;
+      const targetInvoiceRef =
+        extracted.targetInvoiceRef ?? state.targetInvoiceRef ?? null;
+      const useRetainer =
+        extracted.useRetainer ||
+        state.useRetainer ||
+        Boolean(extracted.retainerName);
+      const hasInvoiceChanges =
+        Boolean(extracted.reference) ||
+        Boolean(extracted.date) ||
+        Boolean(extracted.dueDate) ||
+        Boolean(extracted.duePolicy) ||
+        Boolean(extracted.currencyCode) ||
+        (extracted.lineItems?.length ?? 0) > 0;
+
+      const missing =
+        action === "amend_invoice"
+          ? !targetInvoiceRef || !hasInvoiceChanges
+          : action === "create_retainer" || action === "update_retainer"
+            ? !contactName || !retainer?.amount || !retainer.currencyCode
+            : action === "delete_retainer"
+              ? !contactName
+              : action === "list_retainers"
+                ? false
+                : !contactName ||
+                  ((!lineItems || lineItems.length === 0) && !useRetainer);
 
       if (
         missing &&
@@ -89,13 +119,21 @@ export function makeParseInvoiceNode(deps: InvoiceDeps) {
         state.clarifyAttempts < MAX_CLARIFY_ATTEMPTS
       ) {
         return {
+          action,
           docType: extracted.docType,
           contactName,
           lineItems,
           reference: extracted.reference ?? state.reference,
           date: extracted.date ?? state.date,
           dueDate: extracted.dueDate ?? state.dueDate,
+          duePolicy: extracted.duePolicy ?? state.duePolicy,
           currencyCode: extracted.currencyCode ?? state.currencyCode,
+          targetInvoiceRef,
+          amendmentReason: extracted.amendmentReason ?? state.amendmentReason,
+          quotedFxRate: extracted.quotedFxRate ?? state.quotedFxRate,
+          useRetainer,
+          retainerName: extracted.retainerName ?? state.retainerName,
+          retainer,
           clarificationQuestion: extracted.clarificationQuestion,
           _nextNode: INVOICE_NODES.askClarification,
         };
@@ -103,6 +141,7 @@ export function makeParseInvoiceNode(deps: InvoiceDeps) {
 
       if (missing) {
         return {
+          action,
           docType: extracted.docType,
           result: {
             status: "failed" as const,
@@ -112,20 +151,40 @@ export function makeParseInvoiceNode(deps: InvoiceDeps) {
         };
       }
 
+      const nextNode =
+        action === "amend_invoice"
+          ? INVOICE_NODES.prepareAmendment
+          : action === "create_retainer" ||
+              action === "update_retainer" ||
+              action === "delete_retainer" ||
+              action === "list_retainers"
+            ? INVOICE_NODES.manageRetainer
+            : INVOICE_NODES.resolveContact;
+
       return {
+        action,
         docType: extracted.docType,
         contactName,
         lineItems,
         reference: extracted.reference ?? state.reference,
         date: extracted.date ?? state.date,
         dueDate: extracted.dueDate ?? state.dueDate,
+        duePolicy: extracted.duePolicy ?? state.duePolicy,
         currencyCode: extracted.currencyCode ?? state.currencyCode,
-        serviceChargeAmount: extracted.serviceChargeAmount ?? state.serviceChargeAmount,
+        targetInvoiceRef,
+        amendmentReason: extracted.amendmentReason ?? state.amendmentReason,
+        quotedFxRate: extracted.quotedFxRate ?? state.quotedFxRate,
+        useRetainer,
+        retainerName: extracted.retainerName ?? state.retainerName,
+        retainer,
+        serviceChargeAmount:
+          extracted.serviceChargeAmount ?? state.serviceChargeAmount,
         taxRatePercent: extracted.taxRatePercent ?? state.taxRatePercent,
         taxAmount: extracted.taxAmount ?? state.taxAmount,
-        amountsAreTaxInclusive: extracted.amountsAreTaxInclusive ?? state.amountsAreTaxInclusive,
+        amountsAreTaxInclusive:
+          extracted.amountsAreTaxInclusive ?? state.amountsAreTaxInclusive,
         clarificationQuestion: null,
-        _nextNode: INVOICE_NODES.resolveContact,
+        _nextNode: nextNode,
       };
     },
   };

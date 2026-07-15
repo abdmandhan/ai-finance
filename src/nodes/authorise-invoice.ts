@@ -37,7 +37,10 @@ export function makeAuthoriseInvoiceNode(deps: InvoiceDeps) {
             invoiceId: authorised.InvoiceID,
             summary: resultSummary,
             completedApproval: {
-              name: "xero_authorise_invoice",
+              name:
+                state.docType === "sales"
+                  ? "xero_authorise_invoice"
+                  : "xero_authorise_bill",
               provider: "xero",
               ref: authorised.InvoiceID,
               label: resultSummary,

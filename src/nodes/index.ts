@@ -46,9 +46,12 @@ export { makeParseInvoiceNode } from "./parse-invoice";
 export { makeAskInvoiceClarificationNode } from "./ask-invoice-clarification";
 export { makeResolveXeroContactNode } from "./resolve-xero-contact";
 export { makeCheckDuplicateInvoiceNode } from "./check-duplicate-invoice";
+export { makePrepareInvoiceAmendmentNode } from "./prepare-invoice-amendment";
+export { makeManageInvoiceRetainerNode } from "./manage-invoice-retainer";
 export { makeCreateDraftInvoiceNode } from "./create-draft-invoice";
 export { makeAttachInvoiceFileNode } from "./attach-invoice-file";
 export { makeInvoiceApprovalNode } from "./invoice-approval";
+export { makeExecuteInvoiceAmendmentNode } from "./execute-invoice-amendment";
 export { makeAuthoriseInvoiceNode } from "./authorise-invoice";
 export { makeFinalizeInvoiceNode } from "./finalize-invoice";
 // Payment (Xero) nodes

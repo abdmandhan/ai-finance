@@ -19,6 +19,7 @@ export interface XeroLineItem {
 export type InvoiceType = "ACCREC" | "ACCPAY";
 
 export interface XeroInvoiceInput {
+  InvoiceID?: string;
   Type: InvoiceType;
   Contact: { ContactID: string };
   LineItems: XeroLineItem[];
@@ -50,6 +51,19 @@ export interface XeroInvoiceDetail extends XeroInvoice {
   AmountPaid?: number;
   AmountCredited?: number;
   LineItems?: XeroLineItem[];
+}
+
+export interface XeroInvoiceUpdateInput {
+  InvoiceID: string;
+  Type?: InvoiceType;
+  Contact?: { ContactID: string };
+  LineItems?: XeroLineItem[];
+  Status?: "DRAFT" | "AUTHORISED" | "VOIDED";
+  Reference?: string;
+  Date?: string;
+  DueDate?: string;
+  CurrencyCode?: string;
+  LineAmountTypes?: "Exclusive" | "Inclusive" | "NoTax";
 }
 
 /**
@@ -189,6 +203,24 @@ export interface XeroContact {
   ContactID: string;
   Name: string;
   EmailAddress?: string;
+  PaymentTerms?: {
+    Sales?: { Day?: number; Type?: string };
+    Bills?: { Day?: number; Type?: string };
+  };
+  Balances?: {
+    AccountsReceivable?: { Outstanding?: number; Overdue?: number };
+    AccountsPayable?: { Outstanding?: number; Overdue?: number };
+  };
+  ARBalance?: number;
+  APBalance?: number;
+}
+
+export interface XeroCurrencyRate {
+  currency: string;
+  date: string;
+  rate: number;
+  source?: string;
+  timestamp?: string;
 }
 
 export interface XeroAccount {
@@ -217,13 +249,20 @@ export interface IXeroTool {
     auth: XeroAuth,
     invoices: XeroInvoiceInput[],
   ): Promise<XeroInvoice[]>;
+  updateInvoice(
+    auth: XeroAuth,
+    invoice: XeroInvoiceUpdateInput,
+  ): Promise<XeroInvoice>;
   authoriseInvoice(auth: XeroAuth, invoiceId: string): Promise<XeroInvoice>;
   updateInvoiceStatus(
     auth: XeroAuth,
     invoiceId: string,
     status: "AUTHORISED" | "VOIDED",
   ): Promise<XeroInvoice>;
-  getInvoices(auth: XeroAuth, query: InvoiceQuery): Promise<XeroInvoiceDetail[]>;
+  getInvoices(
+    auth: XeroAuth,
+    query: InvoiceQuery,
+  ): Promise<XeroInvoiceDetail[]>;
   attachToInvoice(
     auth: XeroAuth,
     invoiceId: string,
@@ -267,6 +306,12 @@ export interface IXeroTool {
     params: Record<string, string>,
   ): Promise<XeroReport>;
   getOrganisation(auth: XeroAuth): Promise<XeroOrganisation>;
+  getContact(auth: XeroAuth, contactId: string): Promise<XeroContact | null>;
+  getCurrencyRate(
+    auth: XeroAuth,
+    currency: string,
+    date: string,
+  ): Promise<XeroCurrencyRate | null>;
   getAccounts(auth: XeroAuth): Promise<XeroAccount[]>;
   getTaxRates(auth: XeroAuth): Promise<XeroTaxRate[]>;
 }
@@ -406,6 +451,21 @@ export class XeroTool implements IXeroTool {
     return data.Invoices ?? [];
   }
 
+  async updateInvoice(
+    auth: XeroAuth,
+    invoice: XeroInvoiceUpdateInput,
+  ): Promise<XeroInvoice> {
+    const data = await this.request<{ Invoices?: XeroInvoice[] }>(
+      auth,
+      "POST",
+      "/Invoices",
+      { Invoices: [invoice] },
+    );
+    const inv = data.Invoices?.[0];
+    if (!inv) throw new Error("xero updateInvoice returned no invoice");
+    return inv;
+  }
+
   async authoriseInvoice(
     auth: XeroAuth,
     invoiceId: string,
@@ -428,7 +488,9 @@ export class XeroTool implements IXeroTool {
     );
     const inv = data.Invoices?.[0];
     if (!inv)
-      throw new Error(`xero updateInvoiceStatus(${status}) returned no invoice`);
+      throw new Error(
+        `xero updateInvoiceStatus(${status}) returned no invoice`,
+      );
     return inv;
   }
 
@@ -495,7 +557,12 @@ export class XeroTool implements IXeroTool {
         tool: "xero.attach",
         status: "ok",
         durationMs: Date.now() - started,
-        payload: { entityPath, fileName, contentType, byteLength: bytes.length },
+        payload: {
+          entityPath,
+          fileName,
+          contentType,
+          byteLength: bytes.length,
+        },
       });
     } catch (error) {
       this.processLog?.log({
@@ -504,7 +571,12 @@ export class XeroTool implements IXeroTool {
         tool: "xero.attach",
         status: "error",
         durationMs: Date.now() - started,
-        payload: { entityPath, fileName, contentType, byteLength: bytes.length },
+        payload: {
+          entityPath,
+          fileName,
+          contentType,
+          byteLength: bytes.length,
+        },
         error,
       });
       throw error;
@@ -518,7 +590,13 @@ export class XeroTool implements IXeroTool {
     bytes: Uint8Array,
     contentType: string,
   ): Promise<void> {
-    await this.attach(auth, `/Invoices/${invoiceId}`, fileName, bytes, contentType);
+    await this.attach(
+      auth,
+      `/Invoices/${invoiceId}`,
+      fileName,
+      bytes,
+      contentType,
+    );
     this.logger.info({ invoiceId, fileName }, "attached file to Xero invoice");
   }
 
@@ -594,15 +672,20 @@ export class XeroTool implements IXeroTool {
     creditNoteId: string,
     allocation: CreditNoteAllocation,
   ): Promise<void> {
-    await this.request(auth, "PUT", `/CreditNotes/${creditNoteId}/Allocations`, {
-      Allocations: [
-        {
-          Amount: allocation.Amount,
-          Invoice: { InvoiceID: allocation.InvoiceID },
-          ...(allocation.Date ? { Date: allocation.Date } : {}),
-        },
-      ],
-    });
+    await this.request(
+      auth,
+      "PUT",
+      `/CreditNotes/${creditNoteId}/Allocations`,
+      {
+        Allocations: [
+          {
+            Amount: allocation.Amount,
+            Invoice: { InvoiceID: allocation.InvoiceID },
+            ...(allocation.Date ? { Date: allocation.Date } : {}),
+          },
+        ],
+      },
+    );
     this.logger.info(
       { creditNoteId, invoiceId: allocation.InvoiceID },
       "allocated Xero credit note",
@@ -658,9 +741,50 @@ export class XeroTool implements IXeroTool {
         "/Organisation",
       );
       const org = data.Organisations?.[0];
-      if (!org) throw new Error("xero getOrganisation returned no organisation");
+      if (!org)
+        throw new Error("xero getOrganisation returned no organisation");
       return org;
     });
+  }
+
+  async getContact(
+    auth: XeroAuth,
+    contactId: string,
+  ): Promise<XeroContact | null> {
+    const data = await this.request<{ Contacts?: XeroContact[] }>(
+      auth,
+      "GET",
+      `/Contacts/${encodeURIComponent(contactId)}`,
+    );
+    return data.Contacts?.[0] ?? null;
+  }
+
+  async getCurrencyRate(
+    auth: XeroAuth,
+    currency: string,
+    date: string,
+  ): Promise<XeroCurrencyRate | null> {
+    const data = await this.request<{
+      CurrencyRate?: number;
+      Rate?: number;
+      Currency?: string;
+      Date?: string;
+      Source?: string;
+      Timestamp?: string;
+    }>(
+      auth,
+      "GET",
+      `/Currencies/${encodeURIComponent(currency)}/Rate?date=${encodeURIComponent(date)}`,
+    );
+    const rate = data.CurrencyRate ?? data.Rate;
+    if (typeof rate !== "number" || !Number.isFinite(rate)) return null;
+    return {
+      currency: data.Currency ?? currency,
+      date: data.Date ?? date,
+      rate,
+      source: data.Source ?? "xero",
+      timestamp: data.Timestamp ?? new Date().toISOString(),
+    };
   }
 
   async getAccounts(auth: XeroAuth): Promise<XeroAccount[]> {
@@ -718,6 +842,7 @@ export interface StubXeroSeed {
   invoices?: XeroInvoiceDetail[];
   accounts?: XeroAccount[];
   taxRates?: XeroTaxRate[];
+  currencyRates?: Record<string, XeroCurrencyRate>;
   payments?: XeroPayment[];
   reports?: Partial<Record<XeroReportName, XeroReport>>;
   organisation?: XeroOrganisation;
@@ -738,7 +863,12 @@ const STUB_DEFAULT_ACCOUNTS: XeroAccount[] = [
     Status: "ACTIVE",
     TaxType: "INPUT",
   },
-  { Code: "090", Name: "Business Bank Account", Type: "BANK", Status: "ACTIVE" },
+  {
+    Code: "090",
+    Name: "Business Bank Account",
+    Type: "BANK",
+    Status: "ACTIVE",
+  },
   { Code: "091", Name: "Savings", Type: "BANK", Status: "ACTIVE" },
 ];
 
@@ -786,6 +916,7 @@ const STUB_DEFAULT_PNL: XeroReport = {
 /** Offline stub for Studio / tests. Records writes so tests can assert every operation. */
 export class StubXeroTool implements IXeroTool {
   readonly created: XeroInvoiceInput[] = [];
+  readonly updatedInvoices: XeroInvoiceUpdateInput[] = [];
   readonly authorised: string[] = [];
   readonly upserted: { name: string; email?: string }[] = [];
   readonly attached: { invoiceId: string; fileName: string }[] = [];
@@ -803,9 +934,13 @@ export class StubXeroTool implements IXeroTool {
     bankTransactionId: string;
     fileName: string;
   }[] = [];
-  readonly reportRequests: { name: XeroReportName; params: Record<string, string> }[] =
-    [];
+  readonly reportRequests: {
+    name: XeroReportName;
+    params: Record<string, string>;
+  }[] = [];
   readonly invoiceQueries: InvoiceQuery[] = [];
+  readonly contactDetailQueries: string[] = [];
+  readonly currencyRateQueries: { currency: string; date: string }[] = [];
   readonly statusUpdates: { invoiceId: string; status: string }[] = [];
 
   private readonly contacts: XeroContact[];
@@ -844,12 +979,61 @@ export class StubXeroTool implements IXeroTool {
     invoices: XeroInvoiceInput[],
   ): Promise<XeroInvoice[]> {
     this.created.push(...invoices);
-    return invoices.map((inv, i) => ({
-      InvoiceID: `inv_${this.created.length}_${i}`,
-      Type: inv.Type,
-      Status: inv.Status ?? "DRAFT",
-      CurrencyCode: inv.CurrencyCode,
-    }));
+    return invoices.map((inv, i) => {
+      const created: XeroInvoiceDetail = {
+        InvoiceID: `inv_${this.created.length}_${i}`,
+        Type: inv.Type,
+        Status: inv.Status ?? "DRAFT",
+        CurrencyCode: inv.CurrencyCode,
+        Contact: inv.Contact,
+        Reference: inv.Reference,
+        Date: inv.Date,
+        DueDate: inv.DueDate,
+        LineItems: inv.LineItems,
+        Total: inv.LineItems.reduce(
+          (sum, l) => sum + l.Quantity * l.UnitAmount,
+          0,
+        ),
+        AmountDue: inv.LineItems.reduce(
+          (sum, l) => sum + l.Quantity * l.UnitAmount,
+          0,
+        ),
+        AmountPaid: 0,
+        AmountCredited: 0,
+      };
+      this.invoices.push(created);
+      return created;
+    });
+  }
+
+  async updateInvoice(
+    _auth: XeroAuth,
+    invoice: XeroInvoiceUpdateInput,
+  ): Promise<XeroInvoice> {
+    this.updatedInvoices.push(invoice);
+    const seeded = this.invoices.find((i) => i.InvoiceID === invoice.InvoiceID);
+    if (seeded) {
+      Object.assign(seeded, {
+        ...invoice,
+        Type: invoice.Type ?? seeded.Type,
+        Contact: invoice.Contact ?? seeded.Contact,
+        LineItems: invoice.LineItems ?? seeded.LineItems,
+        Status: invoice.Status ?? seeded.Status,
+      });
+      if (invoice.LineItems) {
+        seeded.Total = invoice.LineItems.reduce(
+          (sum, l) => sum + l.Quantity * l.UnitAmount,
+          0,
+        );
+        seeded.AmountDue = seeded.Total - (seeded.AmountPaid ?? 0);
+      }
+    }
+    return {
+      InvoiceID: invoice.InvoiceID,
+      Type: invoice.Type ?? seeded?.Type,
+      Status: invoice.Status ?? seeded?.Status,
+      CurrencyCode: invoice.CurrencyCode ?? seeded?.CurrencyCode,
+    };
   }
 
   async authoriseInvoice(
@@ -1017,7 +1201,10 @@ export class StubXeroTool implements IXeroTool {
     );
     if (seeded) {
       seeded.AmountCredited = (seeded.AmountCredited ?? 0) + allocation.Amount;
-      seeded.AmountDue = Math.max(0, (seeded.AmountDue ?? 0) - allocation.Amount);
+      seeded.AmountDue = Math.max(
+        0,
+        (seeded.AmountDue ?? 0) - allocation.Amount,
+      );
     }
   }
 
@@ -1066,6 +1253,26 @@ export class StubXeroTool implements IXeroTool {
         Timezone: "Asia/Singapore",
       }
     );
+  }
+
+  async getContact(
+    _auth: XeroAuth,
+    contactId: string,
+  ): Promise<XeroContact | null> {
+    this.contactDetailQueries.push(contactId);
+    return this.contacts.find((c) => c.ContactID === contactId) ?? null;
+  }
+
+  async getCurrencyRate(
+    _auth: XeroAuth,
+    currency: string,
+    date: string,
+  ): Promise<XeroCurrencyRate | null> {
+    this.currencyRateQueries.push({ currency, date });
+    const key = `${currency}:${date}`;
+    const rate =
+      this.seed.currencyRates?.[key] ?? this.seed.currencyRates?.[currency];
+    return rate ?? null;
   }
 
   async getAccounts(): Promise<XeroAccount[]> {

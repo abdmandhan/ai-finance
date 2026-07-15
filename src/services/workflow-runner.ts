@@ -5,7 +5,8 @@ import type { AgentEnablement } from "./agent-enablement";
 import type { IProcessLogService } from "./process-log.service";
 
 /** The strict workflows this service can run. Each one is a compiled LangGraph graph. */
-export type Workflow = "schedule" | "invoice" | "payment" | "expense" | "report";
+export type Workflow =
+  "schedule" | "invoice" | "payment" | "expense" | "report";
 
 /** Completed write metadata that becomes outbound `approvalData`. */
 export interface CompletedApproval {
@@ -13,6 +14,12 @@ export interface CompletedApproval {
   provider: string;
   ref: string;
   label?: string;
+  items?: {
+    ref: string;
+    label?: string;
+    status?: "pending" | "completed" | "failed" | "rejected";
+    detail?: string;
+  }[];
 }
 
 /** Minimal graph surface the runner needs — avoids unioning the two giant compiled types. */
@@ -191,7 +198,10 @@ export function createWorkflowRunner(deps: {
     const outcome = {
       kind: "result",
       workflow,
-      result: raw.result ?? { status: "failed", summary: "No result produced." },
+      result: raw.result ?? {
+        status: "failed",
+        summary: "No result produced.",
+      },
     } as const;
     deps.processLog?.log({
       event: "workflow.run.end",

@@ -1,4 +1,10 @@
 import type { InvoiceStateType } from "@/graphs/invoice.state";
+import {
+  invoiceDateWindowAround,
+  invoiceLineSignature,
+  invoiceLineTotal,
+  scoreDuplicateInvoice,
+} from "@/commons";
 import { interrupt } from "@langchain/langgraph";
 import {
   emitProgress,
@@ -10,15 +16,14 @@ import {
 
 /**
  * Duplicate guard before the draft is created (XERO-DOC-029 / XERO-INV-018 /
- * XERO-ERR-010): a non-voided document with the same contact + reference already
- * in Xero pauses the graph and asks before creating a second one. Skipped when
- * no reference was extracted — nothing reliable to match on.
+ * XERO-ERR-010): pause on a 90-day, 3-of-4 match using customer, amount,
+ * line-item signature, and reference/billing marker.
  */
 export function makeCheckDuplicateInvoiceNode(deps: InvoiceDeps) {
   return {
     name: INVOICE_NODES.checkDuplicate,
     node: async (state: InvoiceStateType) => {
-      if (!state.reference || !state.contactId) {
+      if (!state.contactId || !state.lineItems?.length) {
         return { _nextNode: INVOICE_NODES.createDraft };
       }
 
@@ -28,14 +33,31 @@ export function makeCheckDuplicateInvoiceNode(deps: InvoiceDeps) {
         "check_duplicate",
         "Checking for duplicates...",
       );
+      const today = (deps.now?.() ?? new Date()).toISOString().slice(0, 10);
+      const invoiceDate = state.date ?? today;
+      const window = invoiceDateWindowAround(invoiceDate, 90);
+      const total = invoiceLineTotal(state.lineItems);
+      const lineSignature = invoiceLineSignature(state.lineItems);
       let existing;
       try {
         const auth = await deps.resolveXeroAuth(state.tenantId);
         const hits = await deps.xeroTool.getInvoices(auth, {
           contactId: state.contactId,
-          reference: state.reference,
+          type: state.docType === "bill" ? "ACCPAY" : "ACCREC",
+          dateFrom: window.from,
+          dateTo: window.to,
         });
-        existing = hits.find((i) => i.Status !== "VOIDED" && i.Status !== "DELETED");
+        existing = hits
+          .filter((i) => i.Status !== "VOIDED" && i.Status !== "DELETED")
+          .map((invoice) =>
+            scoreDuplicateInvoice(invoice, {
+              contactId: state.contactId,
+              total,
+              lineSignature,
+              reference: state.reference,
+            }),
+          )
+          .find((candidate) => candidate.score >= 3);
       } catch (err) {
         // The duplicate check is best-effort — never block the workflow on it.
         deps.logger.error({ err }, "duplicate check failed — continuing");
@@ -45,11 +67,14 @@ export function makeCheckDuplicateInvoiceNode(deps: InvoiceDeps) {
         return { _nextNode: INVOICE_NODES.createDraft };
       }
 
+      const inv = existing.invoice;
       const payload: InterruptPayload = {
         kind: "clarification",
         message:
-          `A document with reference ${state.reference} for ${state.contactName} already exists in Xero ` +
-          `(${existing.InvoiceNumber ?? existing.InvoiceID}, status ${existing.Status}). ` +
+          `A similar document for ${state.contactName} already exists in Xero ` +
+          `(${inv.InvoiceNumber ?? inv.InvoiceID}, status ${inv.Status}). ` +
+          `Matched ${existing.matched.join(", ")}. ` +
+          `Existing total ${inv.Total ?? "unknown"} vs new total ${total}. ` +
           "Reply 'create anyway' to create another one, or 'cancel' to stop.",
       };
       const reply = interrupt<InterruptPayload, ResumeInput>(payload);
@@ -65,9 +90,10 @@ export function makeCheckDuplicateInvoiceNode(deps: InvoiceDeps) {
       return {
         result: {
           status: "rejected" as const,
-          invoiceId: existing.InvoiceID,
-          summary: `Skipped — ${existing.InvoiceNumber ?? "the existing document"} with reference ${state.reference} already covers this.`,
+          invoiceId: inv.InvoiceID,
+          summary: `Skipped — ${inv.InvoiceNumber ?? "the existing document"} appears to already cover this.`,
         },
+        duplicateCandidate: inv,
         _nextNode: INVOICE_NODES.finalize,
       };
     },

@@ -1,7 +1,9 @@
 export {
   completedApprovalSchemas,
   completedApprovalSchema,
+  completedApprovalItemSchema,
   type CompletedApproval,
+  type CompletedApprovalItem,
 } from "./completed-approval.schema";
 export {
   scheduleSchemas,
@@ -24,10 +26,16 @@ export {
 export {
   invoiceSchemas,
   invoiceLineSchema,
+  invoiceActionSchema,
+  duePolicySchema,
+  invoiceRetainerInputSchema,
   attachmentRefSchema,
   invoiceIntentSchema,
   invoiceResultSchema,
   type InvoiceLine,
+  type InvoiceAction,
+  type DuePolicy,
+  type InvoiceRetainerInput,
   type AttachmentRef,
   type InvoiceIntent,
   type InvoiceResult,

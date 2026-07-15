@@ -7,6 +7,18 @@ export {
   type ToolCallResult,
 } from "./graph-utils";
 export { loggerUtils, type ILogger } from "./logger";
+export {
+  buildAmendmentPreview,
+  duePolicyFromContact,
+  invoiceDateWindowAround,
+  invoiceLineSignature,
+  invoiceLineTotal,
+  resolveDueDate,
+  scoreDuplicateInvoice,
+  type AmendmentPreviewInput,
+  type DueDateResolution,
+  type DuplicateCandidate,
+} from "./invoicing";
 export { withRetry, type RetryFailContext, type RetryOptions } from "./retry";
 export {
   detectConflicts,

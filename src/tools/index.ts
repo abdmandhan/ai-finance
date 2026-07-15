@@ -33,6 +33,17 @@ export {
   type PrefKey,
 } from "./preferences.tool";
 export {
+  createInvoiceRetainersTool,
+  InMemoryInvoiceRetainersTool,
+  INVOICE_RETAINERS_DDL,
+  PostgresInvoiceRetainersTool,
+  setupInvoiceRetainersDb,
+  type IInvoiceRetainersTool,
+  type InvoiceRetainer,
+  type RetainerKey,
+  type UpsertInvoiceRetainerInput,
+} from "./invoice-retainers.tool";
+export {
   createXeroTool,
   extractXeroError,
   XeroTool,
@@ -51,11 +62,13 @@ export {
   type XeroBankTransfer,
   type XeroBankTransferInput,
   type XeroContact,
+  type XeroCurrencyRate,
   type XeroCreditNote,
   type XeroCreditNoteInput,
   type XeroInvoice,
   type XeroInvoiceDetail,
   type XeroInvoiceInput,
+  type XeroInvoiceUpdateInput,
   type XeroLineItem,
   type XeroOrganisation,
   type XeroPayment,

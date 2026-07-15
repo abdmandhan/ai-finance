@@ -35,8 +35,9 @@ export const assistantWorkflowTools = [
   tool(async () => "", {
     name: "create_invoice",
     description: [
-      "Create a sales invoice or supplier bill in Xero from the user's request and any",
-      "attached files. NOT for payments against existing documents (use record_payment),",
+      "Create or amend a sales invoice, create a supplier bill, or manage customer",
+      "retainers for invoice creation in Xero from the user's request and any",
+      "attached files. Use this for changing an existing invoice. NOT for payments against existing documents (use record_payment),",
       "already-paid expenses (use record_expense), or questions about invoicing concepts,",
       "accounting, or tax — answer those directly.",
     ].join(" "),

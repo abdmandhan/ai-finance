@@ -4,7 +4,10 @@ import { defaultAnswerFor, outcomeToOutput } from "./outbound";
 
 describe("outcomeToOutput", () => {
   it("maps pure conversation (no outcome) to ok", () => {
-    expect(outcomeToOutput(null, "Hi!")).toEqual({ answer: "Hi!", intent: "ok" });
+    expect(outcomeToOutput(null, "Hi!")).toEqual({
+      answer: "Hi!",
+      intent: "ok",
+    });
   });
 
   it("maps agent_disabled to not_supported with agentKey", () => {
@@ -125,35 +128,86 @@ describe("outcomeToOutput", () => {
       {
         name: "xero_apply_payment",
         provider: "xero",
-        items: [{ ref: "pay-1", label: "Payment recorded.", status: "completed" }],
+        items: [
+          { ref: "pay-1", label: "Payment recorded.", status: "completed" },
+        ],
+      },
+    ]);
+  });
+
+  it("uses completed approval items when an amendment produces multiple Xero refs", () => {
+    const out = outcomeToOutput(
+      result("invoice", {
+        status: "corrected",
+        summary: "Corrected.",
+        completedApproval: {
+          name: "xero_amend_invoice",
+          provider: "xero",
+          ref: "replacement-1",
+          items: [
+            { ref: "cn-1", label: "credit note", detail: "credits original" },
+            { ref: "replacement-1", label: "replacement invoice" },
+          ],
+        },
+      }),
+      "Corrected.",
+    );
+
+    expect(out.intent).toBe("call_tool");
+    expect(out.approvalData).toEqual([
+      {
+        name: "xero_amend_invoice",
+        provider: "xero",
+        items: [
+          {
+            ref: "cn-1",
+            label: "credit note",
+            detail: "credits original",
+            status: "completed",
+          },
+          {
+            ref: "replacement-1",
+            label: "replacement invoice",
+            status: "completed",
+          },
+        ],
       },
     ]);
   });
 
   it("maps proposed to needs_clarification", () => {
-    const out = outcomeToOutput(result("schedule", { status: "proposed" }), "a");
+    const out = outcomeToOutput(
+      result("schedule", { status: "proposed" }),
+      "a",
+    );
     expect(out.intent).toBe("needs_clarification");
     expect(out.approvalData).toBeUndefined();
   });
 
   it("maps answered to ok", () => {
-    expect(outcomeToOutput(result("schedule", { status: "answered" }), "a").intent).toBe("ok");
+    expect(
+      outcomeToOutput(result("schedule", { status: "answered" }), "a").intent,
+    ).toBe("ok");
   });
 
   it("maps failed/other to not_supported", () => {
-    expect(outcomeToOutput(result("invoice", { status: "failed" }), "a").intent).toBe(
-      "not_supported",
-    );
-    expect(outcomeToOutput(result("invoice", { status: "rejected" }), "a").intent).toBe(
-      "not_supported",
-    );
+    expect(
+      outcomeToOutput(result("invoice", { status: "failed" }), "a").intent,
+    ).toBe("not_supported");
+    expect(
+      outcomeToOutput(result("invoice", { status: "rejected" }), "a").intent,
+    ).toBe("not_supported");
   });
 });
 
 describe("defaultAnswerFor", () => {
   it("uses the clarification question / approval message verbatim", () => {
     expect(
-      defaultAnswerFor({ kind: "clarification", workflow: "schedule", question: "When?" }),
+      defaultAnswerFor({
+        kind: "clarification",
+        workflow: "schedule",
+        question: "When?",
+      }),
     ).toBe("When?");
     expect(
       defaultAnswerFor({
@@ -173,11 +227,12 @@ describe("defaultAnswerFor", () => {
         ["payment", "Payments"],
         ["expense", "Expense"],
         ["report", "Reporting"],
-      ].map(([workflow, label]) =>
-        defaultAnswerFor({
-          kind: "agent_disabled",
-          workflow: workflow as AssistantWorkflowOutcome["workflow"],
-        }) === `The ${label} agent is currently disabled for your workspace.`,
+      ].map(
+        ([workflow, label]) =>
+          defaultAnswerFor({
+            kind: "agent_disabled",
+            workflow: workflow as AssistantWorkflowOutcome["workflow"],
+          }) === `The ${label} agent is currently disabled for your workspace.`,
       ),
     ).toEqual([true, true, true, true, true]);
   });
@@ -190,7 +245,9 @@ describe("defaultAnswerFor", () => {
         result: {
           status: "proposed",
           summary: "Busy then.",
-          suggestedSlots: [{ start: "2026-07-15T10:00", end: "2026-07-15T10:30" }],
+          suggestedSlots: [
+            { start: "2026-07-15T10:00", end: "2026-07-15T10:30" },
+          ],
         },
       }),
     ).toBe("Busy then.\nSome open times:\n- 2026-07-15T10:00");
@@ -198,7 +255,11 @@ describe("defaultAnswerFor", () => {
       defaultAnswerFor({
         kind: "result",
         workflow: "schedule",
-        result: { status: "created", summary: "Booked.", htmlLink: "https://cal/x" },
+        result: {
+          status: "created",
+          summary: "Booked.",
+          htmlLink: "https://cal/x",
+        },
       }),
     ).toBe("Booked.\nhttps://cal/x");
   });

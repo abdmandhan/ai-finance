@@ -1,6 +1,8 @@
 import {
   attachmentRefSchema,
+  invoiceActionSchema,
   invoiceLineSchema,
+  invoiceRetainerInputSchema,
   invoiceResultSchema,
 } from "@/schemas";
 import { StateSchema, UntrackedValue } from "@langchain/langgraph";
@@ -18,6 +20,7 @@ export const InvoiceState = new StateSchema({
   attachments: z.array(attachmentRefSchema).default(() => []),
 
   // Extracted entities
+  action: invoiceActionSchema.default("create_invoice"),
   docType: z.enum(["sales", "bill", "unsupported"]).optional(),
   contactName: z.string().nullish(),
   contactId: z.string().nullish(),
@@ -25,7 +28,14 @@ export const InvoiceState = new StateSchema({
   reference: z.string().nullish(),
   date: z.string().nullish(),
   dueDate: z.string().nullish(),
+  duePolicy: z.string().nullish(),
   currencyCode: z.string().nullish(),
+  targetInvoiceRef: z.string().nullish(),
+  amendmentReason: z.string().nullish(),
+  quotedFxRate: z.number().nullish(),
+  useRetainer: z.boolean().default(false),
+  retainerName: z.string().nullish(),
+  retainer: invoiceRetainerInputSchema.nullish(),
   serviceChargeAmount: z.number().nullish(),
   taxRatePercent: z.number().nullish(),
   taxAmount: z.number().nullish(),
@@ -35,6 +45,16 @@ export const InvoiceState = new StateSchema({
 
   // Working values
   invoiceId: z.string().nullish(),
+  originalInvoice: z.unknown().optional(),
+  amendmentInvoice: z.unknown().optional(),
+  amendmentPreview: z.string().nullish(),
+  amendmentMode: z.enum(["update", "correction"]).nullish(),
+  creditNoteId: z.string().nullish(),
+  customer: z.unknown().optional(),
+  customerArBalance: z.number().nullish(),
+  fxRate: z.number().nullish(),
+  fxWarning: z.string().nullish(),
+  duplicateCandidate: z.unknown().optional(),
   approved: z.boolean().optional(),
 
   // Output

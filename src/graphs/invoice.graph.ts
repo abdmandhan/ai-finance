@@ -5,9 +5,12 @@ import {
   makeAuthoriseInvoiceNode,
   makeCheckDuplicateInvoiceNode,
   makeCreateDraftInvoiceNode,
+  makeExecuteInvoiceAmendmentNode,
   makeFinalizeInvoiceNode,
   makeInvoiceApprovalNode,
+  makeManageInvoiceRetainerNode,
   makeParseInvoiceNode,
+  makePrepareInvoiceAmendmentNode,
   makeResolveXeroContactNode,
   type InvoiceDeps,
 } from "@/nodes";
@@ -46,28 +49,58 @@ export function buildInvoiceGraph(
     "invoice",
     makeCheckDuplicateInvoiceNode(deps),
   );
+  const prepareAmendment = traceGraphNode(
+    deps,
+    "invoice",
+    makePrepareInvoiceAmendmentNode(deps),
+  );
+  const manageRetainer = traceGraphNode(
+    deps,
+    "invoice",
+    makeManageInvoiceRetainerNode(deps),
+  );
   const createDraft = traceGraphNode(
     deps,
     "invoice",
     makeCreateDraftInvoiceNode(deps),
   );
-  const attach = traceGraphNode(deps, "invoice", makeAttachInvoiceFileNode(deps));
-  const approval = traceGraphNode(deps, "invoice", makeInvoiceApprovalNode(deps));
+  const attach = traceGraphNode(
+    deps,
+    "invoice",
+    makeAttachInvoiceFileNode(deps),
+  );
+  const approval = traceGraphNode(
+    deps,
+    "invoice",
+    makeInvoiceApprovalNode(deps),
+  );
+  const executeAmendment = traceGraphNode(
+    deps,
+    "invoice",
+    makeExecuteInvoiceAmendmentNode(deps),
+  );
   const authorise = traceGraphNode(
     deps,
     "invoice",
     makeAuthoriseInvoiceNode(deps),
   );
-  const finalize = traceGraphNode(deps, "invoice", makeFinalizeInvoiceNode(deps));
+  const finalize = traceGraphNode(
+    deps,
+    "invoice",
+    makeFinalizeInvoiceNode(deps),
+  );
 
   const graph = new StateGraph(InvoiceState)
     .addNode(parse.name, parse.node)
     .addNode(clarify.name, clarify.node)
     .addNode(resolveContact.name, resolveContact.node)
     .addNode(checkDuplicate.name, checkDuplicate.node)
+    .addNode(prepareAmendment.name, prepareAmendment.node)
+    .addNode(manageRetainer.name, manageRetainer.node)
     .addNode(createDraft.name, createDraft.node)
     .addNode(attach.name, attach.node)
     .addNode(approval.name, approval.node)
+    .addNode(executeAmendment.name, executeAmendment.node)
     .addNode(authorise.name, authorise.node)
     .addNode(finalize.name, finalize.node)
     .addEdge(START, INVOICE_NODES.parseInvoice)
@@ -77,10 +110,18 @@ export function buildInvoiceGraph(
       pathMap(
         INVOICE_NODES.askClarification,
         INVOICE_NODES.resolveContact,
+        INVOICE_NODES.prepareAmendment,
+        INVOICE_NODES.manageRetainer,
         INVOICE_NODES.finalize,
       ),
     )
     .addEdge(INVOICE_NODES.askClarification, INVOICE_NODES.parseInvoice)
+    .addConditionalEdges(
+      INVOICE_NODES.prepareAmendment,
+      routeByNextNode,
+      pathMap(INVOICE_NODES.approval, INVOICE_NODES.finalize),
+    )
+    .addEdge(INVOICE_NODES.manageRetainer, INVOICE_NODES.finalize)
     .addConditionalEdges(
       INVOICE_NODES.resolveContact,
       routeByNextNode,
@@ -100,8 +141,13 @@ export function buildInvoiceGraph(
     .addConditionalEdges(
       INVOICE_NODES.approval,
       routeByNextNode,
-      pathMap(INVOICE_NODES.authorise, INVOICE_NODES.finalize),
+      pathMap(
+        INVOICE_NODES.authorise,
+        INVOICE_NODES.executeAmendment,
+        INVOICE_NODES.finalize,
+      ),
     )
+    .addEdge(INVOICE_NODES.executeAmendment, INVOICE_NODES.finalize)
     .addEdge(INVOICE_NODES.authorise, INVOICE_NODES.finalize)
     .addEdge(INVOICE_NODES.finalize, END);
 

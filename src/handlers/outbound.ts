@@ -48,22 +48,26 @@ export function outcomeToOutput(
       }
       const answered = result.status === "answered";
       const completed = result.completedApproval;
-      const approvalData =
-        completed
-          ? [
-              {
-                name: completed.name,
-                provider: completed.provider,
-                items: [
-                  {
-                    ref: completed.ref,
-                    label: completed.label ?? result.summary,
-                    status: "completed" as const,
-                  },
-                ],
-              },
-            ]
-          : undefined;
+      const approvalData = completed
+        ? [
+            {
+              name: completed.name,
+              provider: completed.provider,
+              items: completed.items?.length
+                ? completed.items.map((item) => ({
+                    ...item,
+                    status: item.status ?? ("completed" as const),
+                  }))
+                : [
+                    {
+                      ref: completed.ref,
+                      label: completed.label ?? result.summary,
+                      status: "completed" as const,
+                    },
+                  ],
+            },
+          ]
+        : undefined;
       return {
         answer,
         intent: completed ? "call_tool" : answered ? "ok" : "not_supported",

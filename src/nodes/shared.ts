@@ -13,6 +13,7 @@ import type {
 import type {
   ICalendarTool,
   IContactsTool,
+  IInvoiceRetainersTool,
   IMapsTool,
   IPreferencesTool,
   IXeroTool,
@@ -78,9 +79,12 @@ export interface InvoiceDeps {
   xeroTool: IXeroTool;
   resolveXeroAuth: ResolveXeroAuth;
   orgDefaults: OrgDefaultsConfig;
+  invoiceRetainersTool?: IInvoiceRetainersTool;
   /** Download an attachment's bytes/data-url. Optional — image reading + attach skip when absent. */
   fetchAttachment?: FetchAttachment;
   logger: ILogger;
+  /** Injectable clock for deterministic due-date tests; defaults to `() => new Date()`. */
+  now?: () => Date;
   onProgress?: (chatId: string, event: ProgressEvent) => void;
   processLog?: IProcessLogService;
 }
@@ -133,9 +137,12 @@ export const INVOICE_NODES: Record<string, string> = {
   askClarification: "ask_clarification",
   resolveContact: "resolve_xero_contact",
   checkDuplicate: "check_duplicate_invoice",
+  prepareAmendment: "prepare_invoice_amendment",
+  manageRetainer: "manage_invoice_retainer",
   createDraft: "create_draft_invoice",
   attach: "attach_invoice_file",
   approval: "invoice_approval",
+  executeAmendment: "execute_invoice_amendment",
   authorise: "authorise_invoice",
   finalize: "finalize_invoice",
 };
@@ -245,8 +252,7 @@ export function mergePrefs(
   saved: Partial<Record<PreferenceKind, unknown>> | null | undefined,
 ): SchedulingPrefs {
   const hours = saved?.working_hours as
-    | { startHour?: unknown; endHour?: unknown }
-    | undefined;
+    { startHour?: unknown; endHour?: unknown } | undefined;
   const focusBlocks = Array.isArray(saved?.focus_blocks)
     ? (saved.focus_blocks as unknown[])
         .map((b) => {
