@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { chatContentSchema } from "./chat.schema";
 import { completedApprovalSchema } from "./completed-approval.schema";
 
 /** A single invoice/bill line (tax-exclusive unit amount). */
@@ -17,6 +18,7 @@ export const invoiceActionSchema = z
     "update_retainer",
     "delete_retainer",
     "list_retainers",
+    "generate_invoice_pdf",
     "unsupported",
   ])
   .default("create_invoice");
@@ -88,8 +90,13 @@ export const invoiceIntentSchema = z.object({
     .nullable()
     .default(null)
     .describe(
-      "Invoice number/reference to amend, if amending an existing sales invoice",
+      "Invoice number/reference/id to amend or export as PDF, if targeting an existing invoice",
     ),
+  fileName: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe("Requested PDF output file name, when exporting an invoice PDF"),
   amendmentReason: z.string().nullable().default(null),
   quotedFxRate: z.number().positive().nullable().default(null),
   useRetainer: z
@@ -144,6 +151,7 @@ export const invoiceResultSchema = z.object({
   invoiceId: z.string().optional(),
   creditNoteId: z.string().optional(),
   summary: z.string(),
+  documents: z.array(chatContentSchema).optional(),
   completedApproval: completedApprovalSchema.optional(),
 });
 export type InvoiceResult = z.infer<typeof invoiceResultSchema>;

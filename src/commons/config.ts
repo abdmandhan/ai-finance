@@ -79,6 +79,33 @@ const configSchema = z.object({
       url: z.string().default(""),
     })
     .default({ url: "" }),
+  storage: z
+    .object({
+      // Disabled by default. When enabled, generated workflow documents (invoice PDFs)
+      // are uploaded to S3/MinIO and returned as presigned URLs in chat.outbound content[].
+      enabled: z.boolean().default(false),
+      bucket: z.string().default(""),
+      region: z.string().default("auto"),
+      endpoint: z.string().default(""),
+      force_path_style: z.boolean().default(false),
+      access_key_id: z.string().default(""),
+      secret_access_key: z.string().default(""),
+      key_template: z
+        .string()
+        .default("graph/outbound/{tenantId}/{chatId}/{timestamp}-{fileName}"),
+      presign_expiry_seconds: z.number().int().positive().default(86400),
+    })
+    .default({
+      enabled: false,
+      bucket: "",
+      region: "auto",
+      endpoint: "",
+      force_path_style: false,
+      access_key_id: "",
+      secret_access_key: "",
+      key_template: "graph/outbound/{tenantId}/{chatId}/{timestamp}-{fileName}",
+      presign_expiry_seconds: 86400,
+    }),
   calendar: z
     .object({
       // Backend endpoint that mints per-tenant Google access tokens

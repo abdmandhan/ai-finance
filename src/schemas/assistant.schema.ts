@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { chatContentSchema } from "./chat.schema";
 import { completedApprovalSchema } from "./completed-approval.schema";
 
 /**
@@ -20,6 +21,7 @@ export const workflowOutcomeSchema = z.discriminatedUnion("kind", [
     kind: z.literal("clarification"),
     workflow: workflowNameSchema,
     question: z.string(),
+    documents: z.array(chatContentSchema).optional(),
   }),
   z.object({
     kind: z.literal("approval"),
@@ -30,6 +32,7 @@ export const workflowOutcomeSchema = z.discriminatedUnion("kind", [
       provider: z.string(),
       items: z.array(z.object({ ref: z.string(), label: z.string().optional() })),
     }),
+    documents: z.array(chatContentSchema).optional(),
   }),
   z.object({
     kind: z.literal("result"),
@@ -52,6 +55,7 @@ export const workflowOutcomeSchema = z.discriminatedUnion("kind", [
       suggestedSlots: z
         .array(z.object({ start: z.string(), end: z.string() }))
         .optional(),
+      documents: z.array(chatContentSchema).optional(),
       completedApproval: completedApprovalSchema.optional(),
     }),
   }),

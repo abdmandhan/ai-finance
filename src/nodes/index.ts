@@ -48,6 +48,7 @@ export { makeResolveXeroContactNode } from "./resolve-xero-contact";
 export { makeCheckDuplicateInvoiceNode } from "./check-duplicate-invoice";
 export { makePrepareInvoiceAmendmentNode } from "./prepare-invoice-amendment";
 export { makeManageInvoiceRetainerNode } from "./manage-invoice-retainer";
+export { makeGenerateInvoicePdfNode } from "./generate-invoice-pdf";
 export { makeCreateDraftInvoiceNode } from "./create-draft-invoice";
 export { makeAttachInvoiceFileNode } from "./attach-invoice-file";
 export { makeInvoiceApprovalNode } from "./invoice-approval";

@@ -2,7 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { pino } from "pino";
 import { Command, MemorySaver } from "@langchain/langgraph";
 import type { InvoiceIntent } from "@/schemas";
-import type { ILlmService, XeroAuth } from "@/services";
+import {
+  StorageConfigurationError,
+  type ILlmService,
+  type IStorageService,
+  type UploadDocumentInput,
+  type XeroAuth,
+} from "@/services";
 import {
   InMemoryInvoiceRetainersTool,
   StubXeroTool,
@@ -24,6 +30,7 @@ function intent(over: Partial<InvoiceIntent> = {}): InvoiceIntent {
     duePolicy: null,
     currencyCode: null,
     targetInvoiceRef: null,
+    fileName: null,
     amendmentReason: null,
     quotedFxRate: null,
     useRetainer: false,
@@ -36,6 +43,24 @@ function intent(over: Partial<InvoiceIntent> = {}): InvoiceIntent {
     clarificationQuestion: null,
     ...over,
   };
+}
+
+class TestStorageService implements IStorageService {
+  readonly uploaded: UploadDocumentInput[] = [];
+
+  constructor(private readonly fail = false) {}
+
+  async uploadDocument(input: UploadDocumentInput) {
+    if (this.fail) throw new StorageConfigurationError();
+    this.uploaded.push(input);
+    return {
+      type: "document" as const,
+      mimeType: input.mimeType,
+      fileName: input.fileName,
+      url: `https://files.example/${encodeURIComponent(input.fileName)}`,
+      size: input.bytes.length,
+    };
+  }
 }
 
 const fakeAuth: XeroAuth = {
@@ -52,6 +77,7 @@ function buildGraph(
     seed?: StubXeroSeed;
     withFetch?: boolean;
     invoiceRetainersTool?: InMemoryInvoiceRetainersTool;
+    storageService?: IStorageService;
     now?: () => Date;
   } = {},
 ) {
@@ -70,6 +96,7 @@ function buildGraph(
   const deps: InvoiceDeps = {
     llmService,
     xeroTool,
+    storageService: opts.storageService,
     resolveXeroAuth: async () => fakeAuth,
     orgDefaults: {
       taxType: "",
@@ -769,5 +796,285 @@ describe("invoice graph — draft → approve → authorise", () => {
 
     expect(xeroTool.created[0].LineItems).toHaveLength(1);
     expect(xeroTool.created[0].LineItems[0].Description).toBe("Consulting");
+  });
+
+  it("generates a PDF for the current invoice after creation without extra Xero writes", async () => {
+    const storage = new TestStorageService();
+    const { graph, xeroTool } = buildGraph({
+      storageService: storage,
+      intents: [
+        intent(),
+        intent({
+          action: "generate_invoice_pdf",
+          contactName: null,
+          lineItems: [],
+          targetInvoiceRef: null,
+        }),
+      ],
+    });
+    const config = { configurable: { thread_id: "inv-pdf-current" } };
+
+    await graph.invoke(
+      {
+        threadId: "inv-pdf-current",
+        tenantId: "tenant-1",
+        userMessage: "invoice Acme 10 hours at 150",
+      },
+      config,
+    );
+    const authorised: any = await graph.invoke(
+      new Command({ resume: { approved: true } }),
+      config,
+    );
+    const writeCounts = {
+      created: xeroTool.created.length,
+      updated: xeroTool.updatedInvoices.length,
+      authorised: xeroTool.authorised.length,
+    };
+
+    const exported: any = await graph.invoke(
+      {
+        threadId: "inv-pdf-current",
+        tenantId: "tenant-1",
+        userMessage: "generate a PDF for this invoice",
+      },
+      config,
+    );
+
+    expect(exported.result.status).toBe("answered");
+    expect(exported.result.documents?.[0]).toMatchObject({
+      type: "document",
+      mimeType: "application/pdf",
+      size: expect.any(Number),
+    });
+    expect(xeroTool.downloadedInvoicePdfs).toEqual([
+      authorised.result.invoiceId,
+    ]);
+    expect(storage.uploaded).toHaveLength(1);
+    expect({
+      created: xeroTool.created.length,
+      updated: xeroTool.updatedInvoices.length,
+      authorised: xeroTool.authorised.length,
+    }).toEqual(writeCounts);
+  });
+
+  it("resolves an explicit invoice number and exports that PDF", async () => {
+    const storage = new TestStorageService();
+    const seed: StubXeroSeed = {
+      contacts: [{ ContactID: "c-acme", Name: "Acme" }],
+      invoices: [
+        {
+          InvoiceID: "i-200",
+          InvoiceNumber: "INV-200",
+          Type: "ACCREC",
+          Status: "AUTHORISED",
+          Contact: { ContactID: "c-acme", Name: "Acme" },
+          Total: 100,
+          AmountDue: 100,
+        },
+      ],
+    };
+    const { graph, xeroTool } = buildGraph({
+      seed,
+      storageService: storage,
+      intents: [
+        intent({
+          action: "generate_invoice_pdf",
+          contactName: null,
+          lineItems: [],
+          targetInvoiceRef: "INV-200",
+          fileName: "customer copy",
+        }),
+      ],
+    });
+
+    const result: any = await graph.invoke(
+      {
+        threadId: "inv-pdf-explicit",
+        tenantId: "tenant-1",
+        userMessage: "download INV-200 as customer copy pdf",
+      },
+      { configurable: { thread_id: "inv-pdf-explicit" } },
+    );
+
+    expect(result.result.status).toBe("answered");
+    expect(xeroTool.downloadedInvoicePdfs).toEqual(["i-200"]);
+    expect(storage.uploaded[0]).toMatchObject({
+      fileName: "customer copy",
+      mimeType: "application/pdf",
+    });
+  });
+
+  it("asks for clarification when an invoice PDF target is ambiguous", async () => {
+    const storage = new TestStorageService();
+    const seed: StubXeroSeed = {
+      contacts: [{ ContactID: "c-acme", Name: "Acme" }],
+      invoices: [
+        {
+          InvoiceID: "i-1",
+          InvoiceNumber: "INV-1",
+          Type: "ACCREC",
+          Status: "AUTHORISED",
+          Contact: { ContactID: "c-acme", Name: "Acme" },
+          Reference: "DUP",
+        },
+        {
+          InvoiceID: "i-2",
+          InvoiceNumber: "INV-2",
+          Type: "ACCPAY",
+          Status: "DRAFT",
+          Contact: { ContactID: "c-acme", Name: "Acme" },
+          Reference: "DUP",
+        },
+      ],
+    };
+    const { graph, xeroTool } = buildGraph({
+      seed,
+      storageService: storage,
+      intents: [
+        intent({
+          action: "generate_invoice_pdf",
+          contactName: null,
+          lineItems: [],
+          targetInvoiceRef: "DUP",
+        }),
+      ],
+    });
+
+    const paused: any = await graph.invoke(
+      {
+        threadId: "inv-pdf-ambiguous",
+        tenantId: "tenant-1",
+        userMessage: "export DUP as PDF",
+      },
+      { configurable: { thread_id: "inv-pdf-ambiguous" } },
+    );
+
+    expect(paused.__interrupt__?.[0]?.value?.kind).toBe("clarification");
+    expect(paused.__interrupt__?.[0]?.value?.message).toContain(
+      "multiple invoices",
+    );
+    expect(xeroTool.downloadedInvoicePdfs).toHaveLength(0);
+    expect(storage.uploaded).toHaveLength(0);
+  });
+
+  it("generates a draft PDF during approval and keeps authorisation pending", async () => {
+    const storage = new TestStorageService();
+    const { graph, xeroTool } = buildGraph({ storageService: storage });
+    const config = { configurable: { thread_id: "inv-pdf-pending" } };
+
+    await graph.invoke(
+      {
+        threadId: "inv-pdf-pending",
+        tenantId: "tenant-1",
+        userMessage: "invoice Acme 10 hours at 150",
+      },
+      config,
+    );
+    const reasked: any = await graph.invoke(
+      new Command({ resume: { reply: "generate PDF", approved: false } }),
+      config,
+    );
+
+    expect(reasked.__interrupt__?.[0]?.value?.kind).toBe("approval");
+    expect(reasked.__interrupt__?.[0]?.value?.documents?.[0]).toMatchObject({
+      type: "document",
+      mimeType: "application/pdf",
+    });
+    expect(reasked.__interrupt__?.[0]?.value?.message).toContain(
+      "attached the current draft PDF",
+    );
+    expect(xeroTool.downloadedInvoicePdfs).toHaveLength(1);
+    expect(xeroTool.authorised).toHaveLength(0);
+
+    const approved: any = await graph.invoke(
+      new Command({ resume: { approved: true } }),
+      config,
+    );
+    expect(approved.result.status).toBe("created");
+    expect(xeroTool.authorised).toHaveLength(1);
+  });
+
+  it("returns a failed result when Xero PDF download fails", async () => {
+    const storage = new TestStorageService();
+    const seed: StubXeroSeed = {
+      contacts: [{ ContactID: "c-acme", Name: "Acme" }],
+      invoices: [
+        {
+          InvoiceID: "i-error",
+          InvoiceNumber: "INV-ERROR",
+          Type: "ACCREC",
+          Status: "AUTHORISED",
+          Contact: { ContactID: "c-acme", Name: "Acme" },
+        },
+      ],
+      pdfErrorInvoiceIds: ["i-error"],
+    };
+    const { graph, xeroTool } = buildGraph({
+      seed,
+      storageService: storage,
+      intents: [
+        intent({
+          action: "generate_invoice_pdf",
+          contactName: null,
+          lineItems: [],
+          targetInvoiceRef: "INV-ERROR",
+        }),
+      ],
+    });
+
+    const result: any = await graph.invoke(
+      {
+        threadId: "inv-pdf-xero-error",
+        tenantId: "tenant-1",
+        userMessage: "generate PDF for INV-ERROR",
+      },
+      { configurable: { thread_id: "inv-pdf-xero-error" } },
+    );
+
+    expect(result.result.status).toBe("failed");
+    expect(result.result.documents).toBeUndefined();
+    expect(xeroTool.downloadedInvoicePdfs).toEqual(["i-error"]);
+    expect(storage.uploaded).toHaveLength(0);
+  });
+
+  it("returns a failed result when PDF storage is not configured", async () => {
+    const seed: StubXeroSeed = {
+      contacts: [{ ContactID: "c-acme", Name: "Acme" }],
+      invoices: [
+        {
+          InvoiceID: "i-storage",
+          InvoiceNumber: "INV-STORAGE",
+          Type: "ACCREC",
+          Status: "AUTHORISED",
+          Contact: { ContactID: "c-acme", Name: "Acme" },
+        },
+      ],
+    };
+    const { graph, xeroTool } = buildGraph({
+      seed,
+      storageService: new TestStorageService(true),
+      intents: [
+        intent({
+          action: "generate_invoice_pdf",
+          contactName: null,
+          lineItems: [],
+          targetInvoiceRef: "INV-STORAGE",
+        }),
+      ],
+    });
+
+    const result: any = await graph.invoke(
+      {
+        threadId: "inv-pdf-storage-error",
+        tenantId: "tenant-1",
+        userMessage: "generate PDF for INV-STORAGE",
+      },
+      { configurable: { thread_id: "inv-pdf-storage-error" } },
+    );
+
+    expect(result.result.status).toBe("failed");
+    expect(result.result.summary).toBe("PDF export storage is not configured.");
+    expect(xeroTool.downloadedInvoicePdfs).toEqual(["i-storage"]);
   });
 });

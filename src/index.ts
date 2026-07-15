@@ -27,6 +27,7 @@ import {
   createResolveAuth,
   createResolveEnablement,
   createResolveXeroAuth,
+  createStorageService,
   createWorkflowRunner,
   type ICacheService,
   type RunnableGraph,
@@ -45,6 +46,7 @@ async function main(): Promise<void> {
   const config = configUtils.initConfig();
   const logger = loggerUtils.createLogger(config.log);
   const processLog = createProcessLogService(config, logger);
+  const storageService = createStorageService(config.storage, logger);
   const stopProcessLogRetention = processLog.startRetention();
   const llmPricing = createLlmPricingService(config.database.url, logger);
 
@@ -106,6 +108,7 @@ async function main(): Promise<void> {
     {
       llmService,
       xeroTool,
+      storageService,
       resolveXeroAuth,
       orgDefaults: {
         taxType: config.xero.default_tax_type,

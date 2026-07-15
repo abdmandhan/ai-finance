@@ -1,5 +1,6 @@
 import {
   attachmentRefSchema,
+  chatContentSchema,
   invoiceActionSchema,
   invoiceLineSchema,
   invoiceRetainerInputSchema,
@@ -31,6 +32,7 @@ export const InvoiceState = new StateSchema({
   duePolicy: z.string().nullish(),
   currencyCode: z.string().nullish(),
   targetInvoiceRef: z.string().nullish(),
+  fileName: z.string().nullish(),
   amendmentReason: z.string().nullish(),
   quotedFxRate: z.number().nullish(),
   useRetainer: z.boolean().default(false),
@@ -56,6 +58,9 @@ export const InvoiceState = new StateSchema({
   fxWarning: z.string().nullish(),
   duplicateCandidate: z.unknown().optional(),
   approved: z.boolean().optional(),
+  pendingPdfRequest: z.boolean().default(false),
+  pdfDocument: chatContentSchema.optional(),
+  pdfError: z.string().nullish(),
 
   // Output
   result: invoiceResultSchema.optional(),

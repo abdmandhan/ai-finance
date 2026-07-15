@@ -30,6 +30,7 @@ describe("graph-local Kafka fixtures", () => {
     "outbound-approval-pending.json",
     "outbound-approval-completed-payment.json",
     "outbound-document.json",
+    "outbound-invoice-pdf.json",
   ])("parses outbound fixture %s", (name) => {
     expect(() => outboundMessageSchema.parse(loadFixture(name))).not.toThrow();
   });

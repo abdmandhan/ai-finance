@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { pino } from "pino";
 import type { XeroAuth } from "@/services/xero-auth";
 import {
   extractXeroError,
   StubXeroTool,
+  XeroTool,
   type StubXeroSeed,
   type XeroInvoiceDetail,
 } from "./xero.tool";
@@ -13,6 +15,10 @@ const auth: XeroAuth = {
   apiBaseUrl: "https://api.xero.com/api.xro/2.0",
   expiresAtMs: Number.MAX_SAFE_INTEGER,
 };
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 const INVOICES: XeroInvoiceDetail[] = [
   {
@@ -235,6 +241,33 @@ describe("StubXeroTool reports, organisation, status updates", () => {
     expect(stub.statusUpdates).toEqual([{ invoiceId: "i-200", status: "VOIDED" }]);
     const hits = await stub.getInvoices(auth, { statuses: ["VOIDED"] });
     expect(hits.map((i) => i.InvoiceID)).toEqual(["i-200"]);
+  });
+});
+
+describe("XeroTool.getInvoicePdf", () => {
+  it("requests the invoice endpoint as a PDF and returns bytes", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => new Uint8Array([37, 80, 68, 70]).buffer,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const tool = new XeroTool(pino({ level: "silent" }));
+
+    const bytes = await tool.getInvoicePdf(auth, "i-200");
+
+    expect([...bytes]).toEqual([37, 80, 68, 70]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.xero.com/api.xro/2.0/Invoices/i-200",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({
+          accept: "application/pdf",
+          authorization: "Bearer x",
+          "xero-tenant-id": "t",
+        }),
+      }),
+    );
   });
 });
 

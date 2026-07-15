@@ -1,0 +1,25 @@
+{
+  "requestId": "req-007",
+  "chatId": "chat-007",
+  "messageId": "msg-007",
+  "tenantId": "tenant-001",
+  "provider": "telegram",
+  "content": [
+    {
+      "type": "text",
+      "text": "I generated the PDF for invoice INV-100."
+    },
+    {
+      "type": "document",
+      "url": "https://files.example.test/graph/outbound/tenant-001/chat-007/2026-07-15T10-00-00-000Z-INV-100.pdf",
+      "mimeType": "application/pdf",
+      "fileName": "INV-100.pdf",
+      "size": 48291
+    }
+  ],
+  "output": {
+    "answer": "I generated the PDF for invoice INV-100.",
+    "intent": "ok",
+    "agentKey": "invoicing"
+  }
+}

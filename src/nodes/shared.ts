@@ -1,11 +1,12 @@
 import type { ILogger } from "@/commons";
 import type { OrgDefaultsConfig, SchedulingPrefs } from "@/commons";
-import type { ProgressEvent } from "@/schemas";
+import type { ChatContent, ProgressEvent } from "@/schemas";
 import type {
   FetchAttachment,
   IAuditService,
   ILlmService,
   IProcessLogService,
+  IStorageService,
   ResolveAuth,
   ResolveXeroAuth,
   RunWorkflow,
@@ -55,8 +56,8 @@ export interface ScheduleDeps {
  * approve → authorise), carrying structured `approval` data → `output.approvalData`.
  */
 export type InterruptPayload =
-  | { kind: "clarification"; message: string }
-  | { kind: "proposal"; message: string }
+  | { kind: "clarification"; message: string; documents?: ChatContent[] }
+  | { kind: "proposal"; message: string; documents?: ChatContent[] }
   | {
       kind: "approval";
       message: string;
@@ -65,6 +66,7 @@ export type InterruptPayload =
         provider: string;
         items: { ref: string; label?: string }[];
       };
+      documents?: ChatContent[];
     };
 
 /** Resume value threaded back into a paused graph via `Command({ resume })`. */
@@ -77,6 +79,7 @@ export interface ResumeInput {
 export interface InvoiceDeps {
   llmService: ILlmService;
   xeroTool: IXeroTool;
+  storageService?: IStorageService;
   resolveXeroAuth: ResolveXeroAuth;
   orgDefaults: OrgDefaultsConfig;
   invoiceRetainersTool?: IInvoiceRetainersTool;
@@ -139,6 +142,7 @@ export const INVOICE_NODES: Record<string, string> = {
   checkDuplicate: "check_duplicate_invoice",
   prepareAmendment: "prepare_invoice_amendment",
   manageRetainer: "manage_invoice_retainer",
+  generatePdf: "generate_invoice_pdf",
   createDraft: "create_draft_invoice",
   attach: "attach_invoice_file",
   approval: "invoice_approval",

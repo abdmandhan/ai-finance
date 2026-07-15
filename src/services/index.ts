@@ -93,3 +93,12 @@ export {
   type FetchAttachment,
   type FetchedAttachment,
 } from "./media";
+export {
+  createStorageService,
+  DisabledStorageService,
+  S3StorageService,
+  StorageConfigurationError,
+  safeFileName,
+  type IStorageService,
+  type UploadDocumentInput,
+} from "./storage.service";

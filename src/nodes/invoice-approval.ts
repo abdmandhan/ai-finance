@@ -7,6 +7,10 @@ import {
   type ResumeInput,
 } from "./shared";
 
+function isPdfRequest(text: string | undefined): boolean {
+  return /\b(pdf|download|export|print)\b/i.test(text ?? "");
+}
+
 /**
  * Human-approval gate. The DRAFT already exists in Xero; authorising is high-risk, so the graph
  * pauses (durably) and emits `approvalData` (pending). Approve → authorise; reject → leave as draft.
@@ -39,9 +43,14 @@ export function makeInvoiceApprovalNode(deps: InvoiceDeps) {
       }
       if (state.fxWarning) context.push(state.fxWarning);
       const contextText = context.length ? `\n${context.join("\n")}` : "";
+      const pdfText = state.pdfDocument
+        ? `\nI attached the current draft PDF for review.`
+        : state.pdfError
+          ? `\nPDF export note: ${state.pdfError}`
+          : "";
       const message = isAmendment
-        ? `Amendment preview for ${state.contactName}:\n${state.amendmentPreview ?? "No details available."}${contextText}\nReply 'approve' to apply this amendment, or reject to leave Xero unchanged.`
-        : `Draft ${kind} for ${state.contactName}${detail}${contextText} is ready. Reply 'approve' to authorise, or tell me what to change.`;
+        ? `Amendment preview for ${state.contactName}:\n${state.amendmentPreview ?? "No details available."}${contextText}${pdfText}\nReply 'approve' to apply this amendment, or reject to leave Xero unchanged.`
+        : `Draft ${kind} for ${state.contactName}${detail} is ready.${contextText}${pdfText}\nReply 'approve' to authorise, or tell me what to change.`;
 
       const payload: InterruptPayload = {
         kind: "approval",
@@ -67,8 +76,16 @@ export function makeInvoiceApprovalNode(deps: InvoiceDeps) {
             },
           ],
         },
+        ...(state.pdfDocument ? { documents: [state.pdfDocument] } : {}),
       };
       const decision = interrupt<InterruptPayload, ResumeInput>(payload);
+      if (isPdfRequest(decision.reply) && state.invoiceId) {
+        return {
+          pendingPdfRequest: true,
+          pdfError: null,
+          _nextNode: INVOICE_NODES.generatePdf,
+        };
+      }
       const approved = decision.approved === true;
       deps.logger.info({ approved }, "invoice approval decision");
 

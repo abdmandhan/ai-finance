@@ -184,6 +184,48 @@ describe("assistant handler", () => {
     expect(out.output.approvalData?.[0]?.name).toBe("xero_authorise_invoice");
   });
 
+  it("publishes workflow result documents alongside the text content", async () => {
+    const { handler, publishOutbound } = setup({
+      publishPolicy: "workflow_only",
+      graphState: {
+        messages: [new AIMessage("I generated the invoice PDF.")],
+        outcome: {
+          kind: "result",
+          workflow: "invoice",
+          result: {
+            status: "answered",
+            summary: "I generated the invoice PDF.",
+            invoiceId: "inv-1",
+            documents: [
+              {
+                type: "document",
+                mimeType: "application/pdf",
+                fileName: "INV-1.pdf",
+                url: "https://files.example/INV-1.pdf",
+                size: 1234,
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    await handler(inbound("generate PDF"));
+
+    const out = publishOutbound.mock.calls[0][0];
+    expect(out.output.intent).toBe("ok");
+    expect(out.content).toEqual([
+      { type: "text", text: "I generated the invoice PDF." },
+      {
+        type: "document",
+        mimeType: "application/pdf",
+        fileName: "INV-1.pdf",
+        url: "https://files.example/INV-1.pdf",
+        size: 1234,
+      },
+    ]);
+  });
+
   it("still publishes a fresh workflow clarification when publish policy is workflow_only", async () => {
     const { handler, publishOutbound } = setup({
       publishPolicy: "workflow_only",

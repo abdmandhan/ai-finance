@@ -7,6 +7,7 @@ import {
   makeCreateDraftInvoiceNode,
   makeExecuteInvoiceAmendmentNode,
   makeFinalizeInvoiceNode,
+  makeGenerateInvoicePdfNode,
   makeInvoiceApprovalNode,
   makeManageInvoiceRetainerNode,
   makeParseInvoiceNode,
@@ -59,6 +60,11 @@ export function buildInvoiceGraph(
     "invoice",
     makeManageInvoiceRetainerNode(deps),
   );
+  const generatePdf = traceGraphNode(
+    deps,
+    "invoice",
+    makeGenerateInvoicePdfNode(deps),
+  );
   const createDraft = traceGraphNode(
     deps,
     "invoice",
@@ -97,6 +103,7 @@ export function buildInvoiceGraph(
     .addNode(checkDuplicate.name, checkDuplicate.node)
     .addNode(prepareAmendment.name, prepareAmendment.node)
     .addNode(manageRetainer.name, manageRetainer.node)
+    .addNode(generatePdf.name, generatePdf.node)
     .addNode(createDraft.name, createDraft.node)
     .addNode(attach.name, attach.node)
     .addNode(approval.name, approval.node)
@@ -112,6 +119,7 @@ export function buildInvoiceGraph(
         INVOICE_NODES.resolveContact,
         INVOICE_NODES.prepareAmendment,
         INVOICE_NODES.manageRetainer,
+        INVOICE_NODES.generatePdf,
         INVOICE_NODES.finalize,
       ),
     )
@@ -122,6 +130,11 @@ export function buildInvoiceGraph(
       pathMap(INVOICE_NODES.approval, INVOICE_NODES.finalize),
     )
     .addEdge(INVOICE_NODES.manageRetainer, INVOICE_NODES.finalize)
+    .addConditionalEdges(
+      INVOICE_NODES.generatePdf,
+      routeByNextNode,
+      pathMap(INVOICE_NODES.approval, INVOICE_NODES.finalize),
+    )
     .addConditionalEdges(
       INVOICE_NODES.resolveContact,
       routeByNextNode,
@@ -144,6 +157,7 @@ export function buildInvoiceGraph(
       pathMap(
         INVOICE_NODES.authorise,
         INVOICE_NODES.executeAmendment,
+        INVOICE_NODES.generatePdf,
         INVOICE_NODES.finalize,
       ),
     )

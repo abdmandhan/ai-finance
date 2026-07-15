@@ -30,6 +30,7 @@ These IDs track graph-owned parity cases that are not in the older root catalogu
 | XERO-GRAPH-INV-008  | det: non-base-currency invoice fetches Xero FX rate and warns on quoted-rate variance >2%                              |
 | XERO-GRAPH-INV-009  | det: graph-local retainer memory CRUD; retainer line is inserted only when the invoice intent explicitly asks for it   |
 | XERO-GRAPH-INV-010  | det: duplicate guard is 90-day 3-of-4 matching with create-anyway/cancel outcomes                                      |
+| XERO-GRAPH-INV-011  | det: invoice PDF export downloads Xero PDF, stores it through graph storage, and publishes a `document` content block  |
 
 ## 1. Connection & organisation (XERO-AUTH)
 
@@ -110,6 +111,7 @@ These IDs track graph-owned parity cases that are not in the older root catalogu
 | INV-016 | det `XERO-GRAPH-INV-003/004/005`: amend preview + approval; paid/partial/credited use credit note + replacement        |
 | INV-017 | det `XERO-ERR-003`-adjacent: `extractXeroError` surfaces Xero validation messages verbatim; execute nodes return them  |
 | INV-018 | det `XERO-GRAPH-INV-010` (90-day 3-of-4 duplicate guard doubles as retry-after-timeout guard)                          |
+| PDF     | det `XERO-GRAPH-INV-011`: "generate a PDF for this invoice" uses the last invoice in chat or an explicit ref, no write |
 
 ## 5. Contacts (XERO-CON)
 
@@ -199,7 +201,7 @@ These IDs track graph-owned parity cases that are not in the older root catalogu
 | ID         | Coverage                                                                                                                                           |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | AI-001     | det: clarification loop; eval `XERO-AI-001`                                                                                                        |
-| AI-002/003 | AI-003 det `XERO-AI-003` (disambiguation); AI-002 (copy last invoice) **np**                                                                       |
+| AI-002/003 | AI-002 partial: invoice PDF export can use the last invoice in chat; AI-003 det `XERO-AI-003` + `XERO-GRAPH-INV-011` disambiguation               |
 | AI-004     | eval `XERO-AI-004`; mechanically enforced: resume targets only the paused workflow (`createPausedWorkflowCheck` + handler `isAffirmative`)         |
 | AI-005     | partial — amend requests now have explicit field-level preview + approval; editing a just-created draft in the same approval pause is still staged |
 | AI-006     | det `XERO-AI-006` ×3 (payment/expense/invoice reject paths)                                                                                        |
@@ -272,4 +274,5 @@ These IDs track graph-owned parity cases that are not in the older root catalogu
 - Batch operations: multi-invoice/bill payment, batch execution, and partial-failure reporting remain unbuilt.
 - Contact updates, account creation/selection, tracking categories, tax reports, and ledger drill-down are still staged follow-ups.
 - Amendment email/send-to-customer remains deferred; `graph/` does not yet own email or Xero-send workflows.
+- WhatsApp binary document delivery is deferred to App delivery; graph publishes the PDF URL in `content[]` and text today.
 - Reliability gaps remain for `Retry-After` handling and broader local-state reconciliation, which partly belongs in App/backend sync.

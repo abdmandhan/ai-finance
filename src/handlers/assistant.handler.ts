@@ -1,6 +1,10 @@
 import type { ILogger } from "@/commons";
 import type { ResumeInput } from "@/nodes";
-import type { AssistantWorkflowOutcome, InboundMessage } from "@/schemas";
+import type {
+  AssistantWorkflowOutcome,
+  ChatContent,
+  InboundMessage,
+} from "@/schemas";
 import { inboundMessageSchema } from "@/schemas";
 import type {
   IAuditService,
@@ -68,6 +72,17 @@ function lastAIText(state: unknown): string {
   return "";
 }
 
+function documentsFor(
+  outcome: AssistantWorkflowOutcome | null,
+): ChatContent[] {
+  if (!outcome) return [];
+  if (outcome.kind === "result") return outcome.result.documents ?? [];
+  if (outcome.kind === "approval" || outcome.kind === "clarification") {
+    return outcome.documents ?? [];
+  }
+  return [];
+}
+
 /**
  * The hybrid-assistant inbound handler. A paused workflow is resumed first
  * (strict, deterministic); everything else flows through the conversational
@@ -101,7 +116,7 @@ export function createAssistantHandler(deps: AssistantHandlerDeps) {
     });
     await kafka.publishOutbound({
       ...correlations.baseOutbound(chatId),
-      content: [{ type: "text", text: answer }],
+      content: [{ type: "text", text: answer }, ...documentsFor(outcome)],
       output: outcomeToOutput(outcome, answer),
     });
   }

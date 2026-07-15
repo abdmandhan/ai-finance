@@ -1,5 +1,6 @@
 import type { ILogger } from "@/commons";
 import type { InterruptPayload } from "@/nodes";
+import type { ChatContent } from "@/schemas";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { AgentEnablement } from "./agent-enablement";
 import type { IProcessLogService } from "./process-log.service";
@@ -43,6 +44,7 @@ export interface GraphResult {
   period?: { from: string; to: string; label: string };
   basis?: string;
   suggestedSlots?: { start: string; end: string }[];
+  documents?: ChatContent[];
   completedApproval?: CompletedApproval;
 }
 
@@ -52,7 +54,12 @@ export interface GraphResult {
  * assistant only phrases the user-facing text.
  */
 export type WorkflowOutcome =
-  | { kind: "clarification"; workflow: Workflow; question: string }
+  | {
+      kind: "clarification";
+      workflow: Workflow;
+      question: string;
+      documents?: ChatContent[];
+    }
   | {
       kind: "approval";
       workflow: Workflow;
@@ -62,6 +69,7 @@ export type WorkflowOutcome =
         provider: string;
         items: { ref: string; label?: string }[];
       };
+      documents?: ChatContent[];
     }
   | { kind: "result"; workflow: Workflow; result: GraphResult };
 
@@ -183,6 +191,7 @@ export function createWorkflowRunner(deps: {
         workflow,
         message: pending.message,
         approval: pending.approval,
+        documents: pending.documents,
       };
     }
     if (pending) {
@@ -193,7 +202,12 @@ export function createWorkflowRunner(deps: {
         durationMs: Date.now() - started,
         payload: { interrupt: pending },
       });
-      return { kind: "clarification", workflow, question: pending.message };
+      return {
+        kind: "clarification",
+        workflow,
+        question: pending.message,
+        documents: pending.documents,
+      };
     }
     const outcome = {
       kind: "result",

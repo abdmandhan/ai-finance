@@ -263,6 +263,11 @@ export interface IXeroTool {
     auth: XeroAuth,
     query: InvoiceQuery,
   ): Promise<XeroInvoiceDetail[]>;
+  getInvoiceById(
+    auth: XeroAuth,
+    invoiceId: string,
+  ): Promise<XeroInvoiceDetail | null>;
+  getInvoicePdf(auth: XeroAuth, invoiceId: string): Promise<Uint8Array>;
   attachToInvoice(
     auth: XeroAuth,
     invoiceId: string,
@@ -517,6 +522,66 @@ export class XeroTool implements IXeroTool {
       if (batch.length < INVOICE_PAGE_SIZE) break;
     }
     return all;
+  }
+
+  async getInvoiceById(
+    auth: XeroAuth,
+    invoiceId: string,
+  ): Promise<XeroInvoiceDetail | null> {
+    const data = await this.request<{ Invoices?: XeroInvoiceDetail[] }>(
+      auth,
+      "GET",
+      `/Invoices/${encodeURIComponent(invoiceId)}`,
+    );
+    return data.Invoices?.[0] ?? null;
+  }
+
+  async getInvoicePdf(auth: XeroAuth, invoiceId: string): Promise<Uint8Array> {
+    const path = `/Invoices/${encodeURIComponent(invoiceId)}`;
+    const started = Date.now();
+    const tool = "xero.GET /Invoices/{invoiceId}.pdf";
+    this.processLog?.log({
+      event: "tool.call",
+      stage: "xero.start",
+      tool,
+      payload: { invoiceId },
+    });
+    try {
+      const res = await fetch(`${auth.apiBaseUrl}${path}`, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${auth.accessToken}`,
+          "xero-tenant-id": auth.xeroTenantId,
+          accept: "application/pdf",
+        },
+      });
+      if (!res.ok) {
+        throw new Error(
+          `xero GET ${path} pdf ${res.status}: ${extractXeroError(await res.text())}`,
+        );
+      }
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      this.processLog?.log({
+        event: "tool.call",
+        stage: "xero.end",
+        tool,
+        status: "ok",
+        durationMs: Date.now() - started,
+        payload: { invoiceId, byteLength: bytes.length },
+      });
+      return bytes;
+    } catch (error) {
+      this.processLog?.log({
+        event: "tool.call",
+        stage: "xero.error",
+        tool,
+        status: "error",
+        durationMs: Date.now() - started,
+        payload: { invoiceId },
+        error,
+      });
+      throw error;
+    }
   }
 
   /** Attachment upload uses a raw Blob body + the file's content type (not JSON). */
@@ -846,6 +911,8 @@ export interface StubXeroSeed {
   payments?: XeroPayment[];
   reports?: Partial<Record<XeroReportName, XeroReport>>;
   organisation?: XeroOrganisation;
+  invoicePdfs?: Record<string, Uint8Array>;
+  pdfErrorInvoiceIds?: string[];
 }
 
 const STUB_DEFAULT_ACCOUNTS: XeroAccount[] = [
@@ -939,6 +1006,8 @@ export class StubXeroTool implements IXeroTool {
     params: Record<string, string>;
   }[] = [];
   readonly invoiceQueries: InvoiceQuery[] = [];
+  readonly invoiceDetailQueries: string[] = [];
+  readonly downloadedInvoicePdfs: string[] = [];
   readonly contactDetailQueries: string[] = [];
   readonly currencyRateQueries: { currency: string; date: string }[] = [];
   readonly statusUpdates: { invoiceId: string; status: string }[] = [];
@@ -1091,6 +1160,28 @@ export class StubXeroTool implements IXeroTool {
         return false;
       return true;
     });
+  }
+
+  async getInvoiceById(
+    _auth: XeroAuth,
+    invoiceId: string,
+  ): Promise<XeroInvoiceDetail | null> {
+    this.invoiceDetailQueries.push(invoiceId);
+    return this.invoices.find((inv) => inv.InvoiceID === invoiceId) ?? null;
+  }
+
+  async getInvoicePdf(
+    _auth: XeroAuth,
+    invoiceId: string,
+  ): Promise<Uint8Array> {
+    this.downloadedInvoicePdfs.push(invoiceId);
+    if (this.seed.pdfErrorInvoiceIds?.includes(invoiceId)) {
+      throw new Error("Xero PDF download failed");
+    }
+    return (
+      this.seed.invoicePdfs?.[invoiceId] ??
+      new TextEncoder().encode(`%PDF-1.4\nstub invoice ${invoiceId}\n`)
+    );
   }
 
   async attachToInvoice(

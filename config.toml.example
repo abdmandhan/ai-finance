@@ -69,6 +69,19 @@ max_history_messages = 30
 # Leave empty to fall back to an in-memory checkpointer (dev only, no pause/resume durability).
 url = "postgres://tigerscale:tigerscale@localhost:5432/tigerscale?sslmode=disable"
 
+[storage]
+# Generated workflow files (for example invoice PDFs) are uploaded here and sent
+# back on chat.outbound content[] as presigned document URLs.
+enabled = false
+bucket = ""
+region = "auto"
+endpoint = ""                 # e.g. "http://localhost:9000" for MinIO
+force_path_style = false       # true for most MinIO deployments
+access_key_id = ""
+secret_access_key = ""
+key_template = "graph/outbound/{tenantId}/{chatId}/{timestamp}-{fileName}"
+presign_expiry_seconds = 86400
+
 [calendar]
 # Backend endpoint that mints per-tenant Google access tokens for Calendar + Drive (contacts).
 # GET {base}/api/v1/internal/calendar/access?tenantId=<id>  ->  { accessToken, provider, calendarId, emailAddress, expiresAt }

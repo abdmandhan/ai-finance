@@ -18,7 +18,7 @@
     "eval:watch": "vitest --config evals/vitest.config.ts",
     "allure:report": "allure generate allure-results -o allure-report --clean",
     "allure:open": "allure open allure-report",
-    "allure:serve": "allure serve allure-results",
+    "allure:serve": "allure serve allure-results --port 42000",
     "allure:eval": "allure serve allure-results-eval",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -26,6 +26,8 @@
     "graph:dev": "langgraphjs dev"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1087.0",
+    "@aws-sdk/s3-request-presigner": "^3.1087.0",
     "@confluentinc/kafka-javascript": "^1.9.1",
     "@langchain/anthropic": "^1.5.1",
     "@langchain/core": "^1.2.1",

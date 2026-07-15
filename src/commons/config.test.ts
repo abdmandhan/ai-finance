@@ -15,6 +15,17 @@ describe("config schema", () => {
     expect(config.worker.concurrency).toBe(10);
     expect(config.worker.max_attempts).toBe(3);
     expect(config.assistant.publish_policy).toBe("always_publish");
+    expect(config.storage).toEqual({
+      enabled: false,
+      bucket: "",
+      region: "auto",
+      endpoint: "",
+      force_path_style: false,
+      access_key_id: "",
+      secret_access_key: "",
+      key_template: "graph/outbound/{tenantId}/{chatId}/{timestamp}-{fileName}",
+      presign_expiry_seconds: 86400,
+    });
     expect(config.process_log).toEqual({
       enabled: false,
       store_db: true,
@@ -72,6 +83,37 @@ describe("config schema", () => {
     expect(config.process_log.enabled).toBe(true);
     expect(config.process_log.retention_days).toBe(30);
     expect(config.process_log.max_payload_chars).toBe(1000);
+  });
+
+  it("accepts full S3 storage config", () => {
+    const config = configUtils.configSchema.parse({
+      kafka: {},
+      storage: {
+        enabled: true,
+        bucket: "graph-documents",
+        region: "us-east-1",
+        endpoint: "http://localhost:9000",
+        force_path_style: true,
+        access_key_id: "minio",
+        secret_access_key: "secret",
+        key_template: "pdfs/{tenantId}/{chatId}/{fileName}",
+        presign_expiry_seconds: 3600,
+      },
+    });
+
+    expect(config.storage.enabled).toBe(true);
+    expect(config.storage.bucket).toBe("graph-documents");
+    expect(config.storage.force_path_style).toBe(true);
+    expect(config.storage.presign_expiry_seconds).toBe(3600);
+  });
+
+  it("rejects invalid storage presign expiry", () => {
+    expect(() =>
+      configUtils.configSchema.parse({
+        kafka: {},
+        storage: { presign_expiry_seconds: 0 },
+      }),
+    ).toThrow();
   });
 
   it("rejects invalid process log retention and payload limits", () => {

@@ -67,8 +67,10 @@ export function makeParseInvoiceNode(deps: InvoiceDeps) {
       deps.logger.info({ extracted }, "parse-invoice result");
 
       if (
-        extracted.action === "unsupported" ||
+        (extracted.action === "unsupported" ||
         extracted.docType === "unsupported"
+        ) &&
+        extracted.action !== "generate_invoice_pdf"
       ) {
         return {
           action: extracted.action,
@@ -89,6 +91,7 @@ export function makeParseInvoiceNode(deps: InvoiceDeps) {
       const retainer = extracted.retainer ?? state.retainer ?? null;
       const targetInvoiceRef =
         extracted.targetInvoiceRef ?? state.targetInvoiceRef ?? null;
+      const fileName = extracted.fileName ?? state.fileName ?? null;
       const useRetainer =
         extracted.useRetainer ||
         state.useRetainer ||
@@ -102,7 +105,9 @@ export function makeParseInvoiceNode(deps: InvoiceDeps) {
         (extracted.lineItems?.length ?? 0) > 0;
 
       const missing =
-        action === "amend_invoice"
+        action === "generate_invoice_pdf"
+          ? false
+          : action === "amend_invoice"
           ? !targetInvoiceRef || !hasInvoiceChanges
           : action === "create_retainer" || action === "update_retainer"
             ? !contactName || !retainer?.amount || !retainer.currencyCode
@@ -129,6 +134,7 @@ export function makeParseInvoiceNode(deps: InvoiceDeps) {
           duePolicy: extracted.duePolicy ?? state.duePolicy,
           currencyCode: extracted.currencyCode ?? state.currencyCode,
           targetInvoiceRef,
+          fileName,
           amendmentReason: extracted.amendmentReason ?? state.amendmentReason,
           quotedFxRate: extracted.quotedFxRate ?? state.quotedFxRate,
           useRetainer,
@@ -152,7 +158,9 @@ export function makeParseInvoiceNode(deps: InvoiceDeps) {
       }
 
       const nextNode =
-        action === "amend_invoice"
+        action === "generate_invoice_pdf"
+          ? INVOICE_NODES.generatePdf
+          : action === "amend_invoice"
           ? INVOICE_NODES.prepareAmendment
           : action === "create_retainer" ||
               action === "update_retainer" ||
@@ -172,6 +180,7 @@ export function makeParseInvoiceNode(deps: InvoiceDeps) {
         duePolicy: extracted.duePolicy ?? state.duePolicy,
         currencyCode: extracted.currencyCode ?? state.currencyCode,
         targetInvoiceRef,
+        fileName,
         amendmentReason: extracted.amendmentReason ?? state.amendmentReason,
         quotedFxRate: extracted.quotedFxRate ?? state.quotedFxRate,
         useRetainer,
